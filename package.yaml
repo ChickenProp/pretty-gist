@@ -20,11 +20,14 @@ extra-source-files:
 description:         Please see the README on GitHub at <https://github.com/ChickenProp/pretty-gist#readme>
 
 default-extensions:
+- AllowAmbiguousTypes
 - DefaultSignatures
 - DerivingStrategies
 - FlexibleContexts
 - LambdaCase
 - OverloadedStrings
+- ScopedTypeVariables
+- TypeApplications
 - TypeFamilies
 
 dependencies:

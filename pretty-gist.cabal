@@ -31,11 +31,14 @@ library
   hs-source-dirs:
       src
   default-extensions:
+      AllowAmbiguousTypes
       DefaultSignatures
       DerivingStrategies
       FlexibleContexts
       LambdaCase
       OverloadedStrings
+      ScopedTypeVariables
+      TypeApplications
       TypeFamilies
   build-depends:
       base >=4.7 && <5
@@ -52,11 +55,14 @@ test-suite pretty-gist-test
   hs-source-dirs:
       test
   default-extensions:
+      AllowAmbiguousTypes
       DefaultSignatures
       DerivingStrategies
       FlexibleContexts
       LambdaCase
       OverloadedStrings
+      ScopedTypeVariables
+      TypeApplications
       TypeFamilies
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
