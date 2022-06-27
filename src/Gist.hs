@@ -1,7 +1,7 @@
 module Gist
   ( Gist(..)
   , GPMap(..)
-  , GPTextQuotes(..)
+  , GPStrQuotes(..)
   ) where
 
 import           Data.Bifunctor                 ( first )
@@ -19,7 +19,7 @@ import           Prettyprinter
 import qualified Text.Printf                   as Printf
 import           Text.Read                      ( readMaybe )
 
-class Monoid (GistParams a) => Gist a where
+class (Monoid (GistParams a), Monoid (GistParamsList a)) => Gist a where
   type GistParams a :: Type
 
   gist' :: GistParams a -> a -> Doc ann
@@ -34,6 +34,36 @@ class Monoid (GistParams a) => Gist a where
 
   parseParam :: String -> GistParams a
   parseParam _ = mempty
+
+  -- | The instance for `Gist [a]` delegates to this. Customize it if you want
+  -- to customize that instance. Needed for `Gist String`.
+  type GistParamsList a :: Type
+  type GistParamsList a = (Last Int, GistParams a)
+
+  -- | The instance for `Gist [a]` delegates to this. Customize it if you want
+  -- to customize that instance. Needed for `Gist String`.
+  gistList' :: GistParamsList a -> [a] -> Doc ann
+  default gistList'
+    :: GistParamsList a ~ (Last Int, GistParams a)
+    => GistParamsList a -> [a] -> Doc ann
+  gistList' (Last mTake, p) l =
+    let elems = case mTake of
+          Nothing -> map (gist' p) l
+          Just n  -> case splitAt n l of
+            (start, []   ) -> map (gist' p) start
+            (start, _ : _) -> map (gist' p) start ++ ["..."]
+    in  align $ list elems
+
+  -- | The instance for `Gist [a]` delegates to this. Customize it if you want
+  -- to customize that instance. Needed for `Gist String`.
+  parseParamList :: String -> GistParamsList a
+  default parseParamList
+    :: GistParamsList a ~ (Last Int, GistParams a) => String -> GistParamsList a
+  parseParamList s = (mempty, parseParam @a s) <> case words s of
+    ["show-first", n] -> case readMaybe n of
+      Just n' -> (pure n', mempty)
+      Nothing -> mempty
+    _ -> mempty
 
 instance Gist () where
   type GistParams () = ()
@@ -86,36 +116,53 @@ instance Gist Double where
 
     a <&&> f = fmap (fmap f) a
 
-data GPTextQuotes
-  = GPTextQuotesAlways
-  | GPTextQuotesNever
-  | GPTextQuotesSometimes
+data GPStrQuotes
+  = GPStrQuotesAlways
+  | GPStrQuotesNever
+  | GPStrQuotesSometimes
   deriving stock (Eq, Show)
 
-instance Gist Text where
-  type GistParams Text = Last GPTextQuotes
-  gist' q = case fromLast GPTextQuotesSometimes q of
-    GPTextQuotesAlways    -> viaShow
-    GPTextQuotesNever     -> pretty
-    GPTextQuotesSometimes -> \t ->
-      if Text.all
-           (\c ->
-             Char.isAlphaNum c
-               || (      Char.generalCategory c
-                  -- In ascii this is just _ and -, but it includes some unicode
-                  -- characters too.
-                  `elem` [Char.ConnectorPunctuation, Char.DashPunctuation]
-                  )
-           )
-           t
-        then pretty t
-        else viaShow t
+-- | If we use `GPStrQuotesSometimes`, this decides whether an individual
+-- character should be quoted. A string is quoted if it contains any characters
+-- that should be quoted.
+--
+-- Alphanumeric chars, dashes and connectors are unquoted, including ones
+-- outside the ASCII range. Notably this includes `-` and `_`. Everything else
+-- is quoted.
+charWantsQuotes :: Char -> Bool
+charWantsQuotes c =
+  not (Char.isAlphaNum c)
+    && (         Char.generalCategory c
+       `notElem` [Char.ConnectorPunctuation, Char.DashPunctuation]
+       )
 
-  parseParam = \case
-    "QuotesAlways"    -> pure GPTextQuotesAlways
-    "QuotesNever"     -> pure GPTextQuotesNever
-    "QuotesSometimes" -> pure GPTextQuotesSometimes
-    _                 -> mempty
+parseParamGPStrQuotes :: String -> Last GPStrQuotes
+parseParamGPStrQuotes = \case
+  "QuotesAlways"    -> pure GPStrQuotesAlways
+  "QuotesNever"     -> pure GPStrQuotesNever
+  "QuotesSometimes" -> pure GPStrQuotesSometimes
+  _                 -> mempty
+
+instance Gist Char where
+  type GistParams Char = Last GPStrQuotes
+  gist' q c = case fromLast GPStrQuotesSometimes q of
+    GPStrQuotesAlways    -> viaShow c
+    GPStrQuotesNever     -> pretty c
+    GPStrQuotesSometimes -> if charWantsQuotes c then viaShow c else pretty c
+  parseParam = parseParamGPStrQuotes
+
+  type GistParamsList Char = Last GPStrQuotes
+  gistList' q s = gist' q (Text.pack s)
+  parseParamList = parseParamGPStrQuotes
+
+instance Gist Text where
+  type GistParams Text = Last GPStrQuotes
+  gist' q = case fromLast GPStrQuotesSometimes q of
+    GPStrQuotesAlways -> viaShow
+    GPStrQuotesNever  -> pretty
+    GPStrQuotesSometimes ->
+      \t -> if Text.any charWantsQuotes t then viaShow t else pretty t
+  parseParam = parseParamGPStrQuotes
 
 instance (Gist a, Gist b) => Gist (a, b) where
   type GistParams (a, b) = (GistParams a, GistParams b)
@@ -123,20 +170,9 @@ instance (Gist a, Gist b) => Gist (a, b) where
   parseParam s = (parseParam @a s, parseParam @b s)
 
 instance Gist a => Gist [a] where
-  type GistParams [a] = (Last Int, GistParams a)
-  gist' (Last mTake, p) l =
-    let elems = case mTake of
-          Nothing -> map (gist' p) l
-          Just n  -> case splitAt n l of
-            (start, []   ) -> map (gist' p) start
-            (start, _ : _) -> map (gist' p) start ++ ["..."]
-    in  align $ list elems
-
-  parseParam s = (mempty, parseParam @a s) <> case words s of
-    ["show-first", n] -> case readMaybe n of
-      Just n' -> (pure n', mempty)
-      Nothing -> mempty
-    _ -> mempty
+  type GistParams [a] = GistParamsList a
+  gist'      = gistList'
+  parseParam = parseParamList @a
 
 data GPMap = GPMap
   { gpMapKeys :: Last Bool

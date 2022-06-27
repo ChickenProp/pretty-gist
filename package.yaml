@@ -24,11 +24,13 @@ default-extensions:
 - DefaultSignatures
 - DerivingStrategies
 - FlexibleContexts
+- FlexibleInstances
 - LambdaCase
 - OverloadedStrings
 - ScopedTypeVariables
 - TypeApplications
 - TypeFamilies
+- UndecidableInstances
 
 dependencies:
 - base >= 4.7 && < 5

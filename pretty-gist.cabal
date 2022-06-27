@@ -35,11 +35,13 @@ library
       DefaultSignatures
       DerivingStrategies
       FlexibleContexts
+      FlexibleInstances
       LambdaCase
       OverloadedStrings
       ScopedTypeVariables
       TypeApplications
       TypeFamilies
+      UndecidableInstances
   build-depends:
       base >=4.7 && <5
     , containers
@@ -59,11 +61,13 @@ test-suite pretty-gist-test
       DefaultSignatures
       DerivingStrategies
       FlexibleContexts
+      FlexibleInstances
       LambdaCase
       OverloadedStrings
       ScopedTypeVariables
       TypeApplications
       TypeFamilies
+      UndecidableInstances
   ghc-options: -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
