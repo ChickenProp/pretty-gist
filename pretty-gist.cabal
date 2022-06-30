@@ -44,6 +44,7 @@ library
       TypeApplications
       TypeFamilies
       UndecidableInstances
+  ghc-options: -Wall -Wmissing-deriving-strategies -Wredundant-constraints
   build-depends:
       base >=4.7 && <5
     , containers
@@ -72,7 +73,7 @@ test-suite pretty-gist-test
       TypeApplications
       TypeFamilies
       UndecidableInstances
-  ghc-options: -threaded -rtsopts -with-rtsopts=-N
+  ghc-options: -Wall -Wmissing-deriving-strategies -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
       base >=4.7 && <5
     , containers

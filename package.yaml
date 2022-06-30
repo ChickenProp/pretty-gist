@@ -34,6 +34,11 @@ default-extensions:
 - TypeFamilies
 - UndecidableInstances
 
+ghc-options:
+- -Wall
+- -Wmissing-deriving-strategies
+- -Wredundant-constraints
+
 dependencies:
 - base >= 4.7 && < 5
 - containers

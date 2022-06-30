@@ -13,9 +13,7 @@ import           Data.Functor                   ( (<&>) )
 import           Data.Kind                      ( Type )
 import qualified Data.Map.Strict               as Map
 import           Data.Map.Strict                ( Map )
-import           Data.Maybe                     ( fromMaybe )
 import           Data.Monoid                    ( Last(..) )
-import qualified Data.Set                      as Set
 import qualified Data.Text                     as Text
 import           Data.Text                      ( Text )
 import           Data.Traversable               ( for )
@@ -28,7 +26,8 @@ class (Monoid (GistParams a), Monoid (GistParamsList a)) => Gist a where
 
   gist' :: GistParams a -> a -> Doc ann
   default gist' :: (GistParams a ~ (), Pretty a) => GistParams a -> a -> Doc ann
-  gist' _ = pretty
+  gist' ~() = pretty
+  -- ~() here doesn't force, but does avoid a redundant constraint warning
 
   paramParser :: ParamParser (GistParams a)
   paramParser = mempty
@@ -122,7 +121,7 @@ instance Gist Double where
         let isDigit         = (`elem` ("0123456789" :: String))
             isFmtChar       = (`elem` ("fFgGeE" :: String))
             (widthS, rest1) = span isDigit s
-        width <- if null widthS
+        widthI <- if null widthS
           then Right Nothing
           else maybe (Left "cannot parse width")
                      (Right . Just)
@@ -130,7 +129,7 @@ instance Gist Double where
         let (mPrecS, rest2) = case rest1 of
               ('.' : s') -> first Just $ span isDigit s'
               _          -> (Nothing, rest1)
-        prec <- case mPrecS of
+        precI <- case mPrecS of
           Nothing    -> Right Nothing
           Just ""    -> Right (Just 0)
           Just precS -> maybe (Left "cannot parse precision")
@@ -138,8 +137,8 @@ instance Gist Double where
                               (readMaybe precS)
         case rest2 of
           (c : []) | isFmtChar c -> Right $ pure $ Printf.FieldFormat
-            { Printf.fmtWidth     = width
-            , Printf.fmtPrecision = prec
+            { Printf.fmtWidth     = widthI
+            , Printf.fmtPrecision = precI
             , Printf.fmtAdjust    = Nothing
             , Printf.fmtSign      = Nothing
             , Printf.fmtAlternate = False
