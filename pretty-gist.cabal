@@ -33,12 +33,14 @@ library
   default-extensions:
       AllowAmbiguousTypes
       DefaultSignatures
+      DeriveFunctor
       DerivingStrategies
       FlexibleContexts
       FlexibleInstances
       LambdaCase
       OverloadedStrings
       ScopedTypeVariables
+      TupleSections
       TypeApplications
       TypeFamilies
       UndecidableInstances
@@ -59,12 +61,14 @@ test-suite pretty-gist-test
   default-extensions:
       AllowAmbiguousTypes
       DefaultSignatures
+      DeriveFunctor
       DerivingStrategies
       FlexibleContexts
       FlexibleInstances
       LambdaCase
       OverloadedStrings
       ScopedTypeVariables
+      TupleSections
       TypeApplications
       TypeFamilies
       UndecidableInstances

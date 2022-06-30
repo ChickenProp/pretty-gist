@@ -2,9 +2,12 @@ module Gist
   ( Gist(..)
   , GPMap(..)
   , GPStrQuotes(..)
+  , runParamParser
   ) where
 
-import           Data.Bifunctor                 ( first )
+import           Data.Bifunctor                 ( first
+                                                , second
+                                                )
 import qualified Data.Char                     as Char
 import           Data.Functor                   ( (<&>) )
 import           Data.Kind                      ( Type )
@@ -15,6 +18,7 @@ import           Data.Monoid                    ( Last(..) )
 import qualified Data.Set                      as Set
 import qualified Data.Text                     as Text
 import           Data.Text                      ( Text )
+import           Data.Traversable               ( for )
 import           Prettyprinter
 import qualified Text.Printf                   as Printf
 import           Text.Read                      ( readMaybe )
@@ -26,14 +30,14 @@ class (Monoid (GistParams a), Monoid (GistParamsList a)) => Gist a where
   default gist' :: (GistParams a ~ (), Pretty a) => GistParams a -> a -> Doc ann
   gist' _ = pretty
 
+  paramParser :: ParamParser (GistParams a)
+  paramParser = mempty
+
   gist :: a -> Doc ann
   gist = gist' mempty
 
-  gistP :: [String] -> a -> Doc ann
-  gistP ps = gist' (mconcat $ map (parseParam @a) ps)
-
-  parseParam :: String -> GistParams a
-  parseParam _ = mempty
+  gistP :: [(String, String)] -> a -> Doc ann
+  gistP args = gist' $ either error id (runParamParser (paramParser @a) args)
 
   -- | The instance for `Gist [a]` delegates to this. Customize it if you want
   -- to customize that instance. Needed for `Gist String`.
@@ -56,14 +60,38 @@ class (Monoid (GistParams a), Monoid (GistParamsList a)) => Gist a where
 
   -- | The instance for `Gist [a]` delegates to this. Customize it if you want
   -- to customize that instance. Needed for `Gist String`.
-  parseParamList :: String -> GistParamsList a
-  default parseParamList
-    :: GistParamsList a ~ (Last Int, GistParams a) => String -> GistParamsList a
-  parseParamList s = (mempty, parseParam @a s) <> case words s of
-    ["show-first", n] -> case readMaybe n of
-      Just n' -> (pure n', mempty)
-      Nothing -> mempty
-    _ -> mempty
+  paramParserList :: ParamParser (GistParamsList a)
+  default paramParserList
+    :: GistParamsList a ~ (Last Int, GistParams a)
+    => ParamParser (GistParamsList a)
+  paramParserList =
+    ((mempty, ) <$> paramParser @a) <> ((, mempty) <$> listParser)
+   where
+    listParser = ParamParser $ Map.singleton "[]" $ \s -> case words s of
+      ["show-first", n] -> case readMaybe n of
+        Just n' -> Right (pure n')
+        Nothing -> Left "Expected \"show-first (int)\""
+      _ -> Left "Expected \"show-first (int)\""
+
+newtype ParamParser a = ParamParser (Map String (String -> Either String a))
+  deriving stock Functor
+
+instance Semigroup a => Semigroup (ParamParser a) where
+  ParamParser m1 <> ParamParser m2 = ParamParser $ Map.unionWith combine m1 m2
+    where f1 `combine` f2 = \s -> (<>) <$> f1 s <*> f2 s
+
+instance Monoid a => Monoid (ParamParser a) where
+  mempty = ParamParser mempty
+
+runParamParser
+  :: Monoid a => ParamParser a -> [(String, String)] -> Either String a
+runParamParser (ParamParser parser) args =
+  second mconcat $ for args $ \(ctx, p) -> if ctx == "*"
+    then Right $ mconcat $ Map.elems $ parser <&> \func ->
+      either mempty id (func p)
+    else case Map.lookup ctx parser of
+      Nothing   -> Right mempty
+      Just func -> func p
 
 instance Gist () where
   type GistParams () = ()
@@ -77,13 +105,13 @@ instance Gist Double where
     Last Nothing  -> pretty
     Last (Just f) -> \d -> pretty $ Printf.formatRealFloat d f ""
 
-  parseParam = fromMaybe mempty . go
+  paramParser = ParamParser $ Map.singleton "Double" go
    where
     -- This is pretty awkward. Text.Printf doesn't expose any way to parse a
     -- FieldFormat, so we do it ourselves. We might want our own version of
     -- FieldFormat, to get a Show instance and to allow comma separation.
     go = \case
-      [] -> Nothing
+      [] -> Left "incomplete format string"
       ('-' : s) ->
         go s <&&> \f -> f { Printf.fmtAdjust = Just Printf.LeftAdjust }
       ('+' : s) -> go s <&&> \f -> f { Printf.fmtSign = Just Printf.SignPlus }
@@ -94,16 +122,22 @@ instance Gist Double where
         let isDigit         = (`elem` ("0123456789" :: String))
             isFmtChar       = (`elem` ("fFgGeE" :: String))
             (widthS, rest1) = span isDigit s
-        width <- if null widthS then Just Nothing else Just <$> readMaybe widthS
+        width <- if null widthS
+          then Right Nothing
+          else maybe (Left "cannot parse width")
+                     (Right . Just)
+                     (readMaybe widthS)
         let (mPrecS, rest2) = case rest1 of
               ('.' : s') -> first Just $ span isDigit s'
               _          -> (Nothing, rest1)
         prec <- case mPrecS of
-          Nothing    -> Just Nothing
-          Just ""    -> Just (Just 0)
-          Just precS -> Just <$> readMaybe precS
+          Nothing    -> Right Nothing
+          Just ""    -> Right (Just 0)
+          Just precS -> maybe (Left "cannot parse precision")
+                              (Right . Just)
+                              (readMaybe precS)
         case rest2 of
-          (c : []) | isFmtChar c -> Just $ pure $ Printf.FieldFormat
+          (c : []) | isFmtChar c -> Right $ pure $ Printf.FieldFormat
             { Printf.fmtWidth     = width
             , Printf.fmtPrecision = prec
             , Printf.fmtAdjust    = Nothing
@@ -112,7 +146,7 @@ instance Gist Double where
             , Printf.fmtModifiers = ""
             , Printf.fmtChar      = c
             }
-          _ -> Nothing
+          _ -> Left "cannot parse format specifier"
 
     a <&&> f = fmap (fmap f) a
 
@@ -136,12 +170,12 @@ charWantsQuotes c =
        `notElem` [Char.ConnectorPunctuation, Char.DashPunctuation]
        )
 
-parseParamGPStrQuotes :: String -> Last GPStrQuotes
-parseParamGPStrQuotes = \case
-  "QuotesAlways"    -> pure GPStrQuotesAlways
-  "QuotesNever"     -> pure GPStrQuotesNever
-  "QuotesSometimes" -> pure GPStrQuotesSometimes
-  _                 -> mempty
+paramParserGPStrQuotes :: ParamParser (Last GPStrQuotes)
+paramParserGPStrQuotes = ParamParser $ Map.singleton "string" $ \case
+  "QuotesAlways"    -> Right $ pure GPStrQuotesAlways
+  "QuotesNever"     -> Right $ pure GPStrQuotesNever
+  "QuotesSometimes" -> Right $ pure GPStrQuotesSometimes
+  _                 -> Left "unknown quote specifier"
 
 instance Gist Char where
   type GistParams Char = Last GPStrQuotes
@@ -149,11 +183,11 @@ instance Gist Char where
     GPStrQuotesAlways    -> viaShow c
     GPStrQuotesNever     -> pretty c
     GPStrQuotesSometimes -> if charWantsQuotes c then viaShow c else pretty c
-  parseParam = parseParamGPStrQuotes
+  paramParser = paramParserGPStrQuotes
 
   type GistParamsList Char = Last GPStrQuotes
   gistList' q s = gist' q (Text.pack s)
-  parseParamList = parseParamGPStrQuotes
+  paramParserList = paramParserGPStrQuotes
 
 instance Gist Text where
   type GistParams Text = Last GPStrQuotes
@@ -162,17 +196,18 @@ instance Gist Text where
     GPStrQuotesNever  -> pretty
     GPStrQuotesSometimes ->
       \t -> if Text.any charWantsQuotes t then viaShow t else pretty t
-  parseParam = parseParamGPStrQuotes
+  paramParser = paramParserGPStrQuotes
 
 instance (Gist a, Gist b) => Gist (a, b) where
   type GistParams (a, b) = (GistParams a, GistParams b)
   gist' (pa, pb) (a, b) = tupled [gist' pa a, gist' pb b]
-  parseParam s = (parseParam @a s, parseParam @b s)
+  paramParser =
+    ((, mempty) <$> paramParser @a) <> ((mempty, ) <$> paramParser @b)
 
 instance Gist a => Gist [a] where
   type GistParams [a] = GistParamsList a
-  gist'      = gistList'
-  parseParam = parseParamList @a
+  gist'       = gistList'
+  paramParser = paramParserList @a
 
 data GPMap = GPMap
   { gpMapKeys :: Last Bool
@@ -197,10 +232,15 @@ instance (Gist k, Gist v) => Gist (Map k v) where
         <> ": "
         <> (if fromLast True showVals then gist' pv v else "_")
 
-  parseParam s = (mempty, parseParam @k s, parseParam @v s) <> case s of
-    "hide-keys" -> (GPMap (pure False) mempty, mempty, mempty)
-    "hide-vals" -> (GPMap mempty (pure False), mempty, mempty)
-    _           -> mempty
+  paramParser =
+    ((mempty, , mempty) <$> paramParser @k)
+      <> ((mempty, mempty, ) <$> paramParser @v)
+      <> ((, mempty, mempty) <$> mapParser)
+   where
+    mapParser = ParamParser $ Map.singleton "Map" $ \case
+      "hide-keys" -> Right $ GPMap (pure False) mempty
+      "hide-vals" -> Right $ GPMap mempty (pure False)
+      _           -> Left "Expected hide-keys or hide-vals"
 
 fromLast :: a -> Last a -> a
 fromLast def = \case

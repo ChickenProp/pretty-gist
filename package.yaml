@@ -22,12 +22,14 @@ description:         Please see the README on GitHub at <https://github.com/Chic
 default-extensions:
 - AllowAmbiguousTypes
 - DefaultSignatures
+- DeriveFunctor
 - DerivingStrategies
 - FlexibleContexts
 - FlexibleInstances
 - LambdaCase
 - OverloadedStrings
 - ScopedTypeVariables
+- TupleSections
 - TypeApplications
 - TypeFamilies
 - UndecidableInstances
