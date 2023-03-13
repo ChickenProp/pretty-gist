@@ -17,12 +17,14 @@ import           Data.Monoid                    ( Last(..) )
 import qualified Data.Text                     as Text
 import           Data.Text                      ( Text )
 import           Data.Traversable               ( for )
+import           GHC.Stack                      ( HasCallStack )
 import           Prettyprinter
 import qualified Text.Printf                   as Printf
 import           Text.Read                      ( readMaybe )
 
 class (Monoid (GistParams a), Monoid (GistParamsList a)) => Gist a where
   type GistParams a :: Type
+  type GistParams a = ()
 
   gist' :: GistParams a -> a -> Doc ann
   default gist' :: (GistParams a ~ (), Pretty a) => GistParams a -> a -> Doc ann
@@ -35,7 +37,7 @@ class (Monoid (GistParams a), Monoid (GistParamsList a)) => Gist a where
   gist :: a -> Doc ann
   gist = gist' mempty
 
-  gistP :: [(String, String)] -> a -> Doc ann
+  gistP :: HasCallStack => [(String, String)] -> a -> Doc ann
   gistP args = gist' $ either error id (runParamParser (paramParser @a) args)
 
   -- | The instance for `Gist [a]` delegates to this. Customize it if you want
@@ -104,7 +106,7 @@ instance Gist Double where
     Last Nothing  -> pretty
     Last (Just f) -> \d -> pretty $ Printf.formatRealFloat d f ""
 
-  paramParser = ParamParser $ Map.singleton "Double" go
+  paramParser = ParamParser $ Map.fromList [("Double", go), ("Floating", go)]
    where
     -- This is pretty awkward. Text.Printf doesn't expose any way to parse a
     -- FieldFormat, so we do it ourselves. We might want our own version of
@@ -169,12 +171,15 @@ charWantsQuotes c =
        `notElem` [Char.ConnectorPunctuation, Char.DashPunctuation]
        )
 
-paramParserGPStrQuotes :: ParamParser (Last GPStrQuotes)
-paramParserGPStrQuotes = ParamParser $ Map.singleton "string" $ \case
-  "QuotesAlways"    -> Right $ pure GPStrQuotesAlways
-  "QuotesNever"     -> Right $ pure GPStrQuotesNever
-  "QuotesSometimes" -> Right $ pure GPStrQuotesSometimes
-  _                 -> Left "unknown quote specifier"
+paramParserGPStrQuotes :: String -> ParamParser (Last GPStrQuotes)
+paramParserGPStrQuotes otherName = ParamParser
+  $ Map.fromList [("IsString", go), (otherName, go)]
+ where
+  go = \case
+    "QuotesAlways"    -> Right $ pure GPStrQuotesAlways
+    "QuotesNever"     -> Right $ pure GPStrQuotesNever
+    "QuotesSometimes" -> Right $ pure GPStrQuotesSometimes
+    _                 -> Left "unknown quote specifier"
 
 instance Gist Char where
   type GistParams Char = Last GPStrQuotes
@@ -182,11 +187,11 @@ instance Gist Char where
     GPStrQuotesAlways    -> viaShow c
     GPStrQuotesNever     -> pretty c
     GPStrQuotesSometimes -> if charWantsQuotes c then viaShow c else pretty c
-  paramParser = paramParserGPStrQuotes
+  paramParser = paramParserGPStrQuotes "Char"
 
   type GistParamsList Char = Last GPStrQuotes
   gistList' q s = gist' q (Text.pack s)
-  paramParserList = paramParserGPStrQuotes
+  paramParserList = paramParserGPStrQuotes "String"
 
 instance Gist Text where
   type GistParams Text = Last GPStrQuotes
@@ -195,7 +200,7 @@ instance Gist Text where
     GPStrQuotesNever  -> pretty
     GPStrQuotesSometimes ->
       \t -> if Text.any charWantsQuotes t then viaShow t else pretty t
-  paramParser = paramParserGPStrQuotes
+  paramParser = paramParserGPStrQuotes "Text"
 
 instance (Gist a, Gist b) => Gist (a, b) where
   type GistParams (a, b) = (GistParams a, GistParams b)

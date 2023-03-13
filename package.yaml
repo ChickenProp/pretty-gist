@@ -58,3 +58,6 @@ tests:
     - -with-rtsopts=-N
     dependencies:
     - pretty-gist
+    - hspec
+    - hspec-expectations
+    - QuickCheck

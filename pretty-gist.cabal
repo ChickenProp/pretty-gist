@@ -1,6 +1,6 @@
 cabal-version: 1.12
 
--- This file has been generated from package.yaml by hpack version 0.34.6.
+-- This file has been generated from package.yaml by hpack version 0.34.4.
 --
 -- see: https://github.com/sol/hpack
 
@@ -75,8 +75,11 @@ test-suite pretty-gist-test
       UndecidableInstances
   ghc-options: -Wall -Wmissing-deriving-strategies -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:
-      base >=4.7 && <5
+      QuickCheck
+    , base >=4.7 && <5
     , containers
+    , hspec
+    , hspec-expectations
     , pretty-gist
     , prettyprinter
     , text
