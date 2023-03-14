@@ -37,8 +37,10 @@ library
       DerivingStrategies
       FlexibleContexts
       FlexibleInstances
+      GADTs
       LambdaCase
       OverloadedStrings
+      PolyKinds
       ScopedTypeVariables
       TupleSections
       TypeApplications
@@ -66,8 +68,10 @@ test-suite pretty-gist-test
       DerivingStrategies
       FlexibleContexts
       FlexibleInstances
+      GADTs
       LambdaCase
       OverloadedStrings
+      PolyKinds
       ScopedTypeVariables
       TupleSections
       TypeApplications

@@ -26,8 +26,10 @@ default-extensions:
 - DerivingStrategies
 - FlexibleContexts
 - FlexibleInstances
+- GADTs
 - LambdaCase
 - OverloadedStrings
+- PolyKinds
 - ScopedTypeVariables
 - TupleSections
 - TypeApplications
