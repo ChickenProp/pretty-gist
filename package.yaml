@@ -61,5 +61,6 @@ tests:
     dependencies:
     - pretty-gist
     - hspec
+    - hspec-core
     - hspec-expectations
     - QuickCheck

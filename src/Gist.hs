@@ -1,11 +1,13 @@
 module Gist
   ( Gist(..)
   , Configurable(..)
+  , Config(..)
   , config
   , strConfig
   , gist
   , ConfMap(..)
   , ConfStrQuotes(..)
+  , configLookup
   ) where
 
 import           Data.Bifunctor                 ( first )
@@ -47,7 +49,7 @@ class Configurable a => Gist a where
     -> Doc ann
   gistList' conf l =
     let (Last mTake, Last mSubConf) =
-          configLookup @[] conf <> configLookupList @a conf
+          configLookup @[] conf <> configLookup @[a] conf
         subConf = fromMaybe conf mSubConf
         elems = case mTake of
           Nothing -> map (gist' subConf) l
@@ -95,6 +97,9 @@ class
 data SomeConfigurable = forall a . Configurable a => SomeConfigurable
                                                        !(TypeRep a)
 
+instance Show SomeConfigurable where
+  showsPrec p (SomeConfigurable tr) = showsPrec p tr
+
 instance Eq SomeConfigurable where
   SomeConfigurable a == SomeConfigurable b = SomeTypeRep a == SomeTypeRep b
 
@@ -102,10 +107,11 @@ instance Ord SomeConfigurable where
   SomeConfigurable a `compare` SomeConfigurable b =
     SomeTypeRep a `compare` SomeTypeRep b
 
-newtype Config = Config (Map SomeConfigurable Dyn.Dynamic)
+newtype Config =
+  UnsafeConfig { unsafeUnConfig :: Map SomeConfigurable Dyn.Dynamic }
 
 instance Semigroup Config where
-  Config m1 <> Config m2 = Config $ Map.unionWithKey f m1 m2
+  UnsafeConfig m1 <> UnsafeConfig m2 = UnsafeConfig $ Map.unionWithKey f m1 m2
    where
     f sc dyn1 dyn2 = case sc of
       SomeConfigurable c -> concatDyns c dyn1 dyn2
@@ -127,21 +133,14 @@ instance Semigroup Config where
           _                  -> error "Bad Dynamic saved in Config"
 
 instance Monoid Config where
-  mempty = Config mempty
+  mempty = UnsafeConfig mempty
 
 configInsert :: forall a . Configurable a => ConfigFor a -> Config -> Config
-configInsert confFor (Config m) =
-  Config $ Map.insert (SomeConfigurable $ typeRep @a) (Dyn.toDyn confFor) m
+configInsert confFor (UnsafeConfig m) = UnsafeConfig
+  $ Map.insert (SomeConfigurable $ typeRep @a) (Dyn.toDyn confFor) m
 
 configLookup :: forall a . Configurable a => Config -> ConfigFor a
-configLookup (Config m) = case Map.lookup (SomeConfigurable $ typeRep @a) m of
-  Nothing  -> mempty
-  Just dyn -> case Dyn.fromDynamic dyn of
-    Nothing   -> error "Bad Dynamic saved in Config"
-    Just conf -> conf
-
-configLookupList :: forall a . Configurable a => Config -> ConfigForList a
-configLookupList (Config m) =
+configLookup (UnsafeConfig m) =
   case Map.lookup (SomeConfigurable $ typeRep @a) m of
     Nothing  -> mempty
     Just dyn -> case Dyn.fromDynamic dyn of
@@ -248,6 +247,26 @@ instance Configurable Floating where
 
     a <&&> f = fmap (fmap f) a
 
+data ConfStrQuotes
+  = ConfStrQuotesAlways
+  | ConfStrQuotesNever
+  | ConfStrQuotesSometimes
+  deriving stock (Eq, Show)
+
+-- | If we use `ConfStrQuotesSometimes`, this decides whether an individual
+-- character should be quoted. A string is quoted if it contains any characters
+-- that should be quoted.
+--
+-- Alphanumeric chars, dashes and connectors are unquoted, including ones
+-- outside the ASCII range. Notably this includes `-` and `_`. Everything else
+-- is quoted.
+charWantsQuotes :: Char -> Bool
+charWantsQuotes c =
+  not (Char.isAlphaNum c)
+    && (         Char.generalCategory c
+       `notElem` [Char.ConnectorPunctuation, Char.DashPunctuation]
+       )
+
 instance Configurable IsString where
   type ConfigFor IsString = Last ConfStrQuotes
   parseConfigFor = \case
@@ -316,10 +335,24 @@ instance Typeable a => Configurable ((,) a) where
   type ConfigFor ((,) a) = (Last Config, Last Config)
   parseConfigFor _ = Left "Cannot parse config for ((,) a)"
 
+data ConfMap = ConfMap
+  { confMapShowKeys :: Last Bool
+  , confMapShowVals :: Last Bool
+  }
+  deriving stock (Eq, Show)
+
+instance Semigroup ConfMap where
+  (ConfMap a1 b1) <> (ConfMap a2 b2) = ConfMap (a1 <> a2) (b1 <> b2)
+instance Monoid ConfMap where
+  mempty = ConfMap mempty mempty
+
 instance (Gist k, Gist v) => Gist (Map k v) where
   gist' conf m =
     let
-      (ConfMap showKeys showVals, confK, confV) = configLookup @(Map k v) conf
+      (ConfMap showKeys showVals, confK, confV) =
+        configLookup @Map conf
+          <> configLookup @(Map k) conf
+          <> configLookup @(Map k v) conf
       showKV (k, v) =
         (if fromLast True showKeys then gist' (fromLast conf confK) k else "_")
           <> ": "
@@ -333,42 +366,19 @@ instance (Gist k, Gist v) => Gist (Map k v) where
       $ (showKV <$> Map.toList m)
 
 instance (Typeable k, Typeable v) => Configurable (Map k v) where
-  type ConfigFor (Map k v) = (ConfMap, Last Config, Last Config)
+  type ConfigFor (Map k v) = ConfigFor Map
+  parseConfigFor = parseConfigFor @Map
+
+instance (Typeable k) => Configurable (Map k) where
+  type ConfigFor (Map k) = ConfigFor Map
+  parseConfigFor = parseConfigFor @Map
+
+instance Configurable Map where
+  type ConfigFor Map = (ConfMap, Last Config, Last Config)
   parseConfigFor = \case
     "hide-keys" -> Right (ConfMap (pure False) mempty, mempty, mempty)
     "hide-vals" -> Right (ConfMap mempty (pure False), mempty, mempty)
     _           -> Left "Expected hide-keys or hide-vals"
-
-data ConfStrQuotes
-  = ConfStrQuotesAlways
-  | ConfStrQuotesNever
-  | ConfStrQuotesSometimes
-  deriving stock (Eq, Show)
-
--- | If we use `ConfStrQuotesSometimes`, this decides whether an individual
--- character should be quoted. A string is quoted if it contains any characters
--- that should be quoted.
---
--- Alphanumeric chars, dashes and connectors are unquoted, including ones
--- outside the ASCII range. Notably this includes `-` and `_`. Everything else
--- is quoted.
-charWantsQuotes :: Char -> Bool
-charWantsQuotes c =
-  not (Char.isAlphaNum c)
-    && (         Char.generalCategory c
-       `notElem` [Char.ConnectorPunctuation, Char.DashPunctuation]
-       )
-
-data ConfMap = ConfMap
-  { confMapShowKeys :: Last Bool
-  , confMapShowVals :: Last Bool
-  }
-  deriving stock (Eq, Show)
-
-instance Semigroup ConfMap where
-  (ConfMap a1 b1) <> (ConfMap a2 b2) = ConfMap (a1 <> a2) (b1 <> b2)
-instance Monoid ConfMap where
-  mempty = ConfMap mempty mempty
 
 fromLast :: a -> Last a -> a
 fromLast def = \case
