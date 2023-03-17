@@ -68,15 +68,15 @@ main = Hspec.hspec $ do
   describe "gisting stringy things" $ do
     let tests :: IsString a => [([String], a, Text)]
         tests =
-          [ (["QuotesAlways"]   , "foo"    , "\"foo\"")
-          , (["QuotesSometimes"], "foo"    , "foo")
-          , (["QuotesNever"]    , "foo"    , "foo")
-          , (["QuotesAlways"]   , "foo-bar", "\"foo-bar\"")
-          , (["QuotesSometimes"], "foo-bar", "foo-bar")
-          , (["QuotesNever"]    , "foo-bar", "foo-bar")
-          , (["QuotesAlways"]   , "foo bar", "\"foo bar\"")
-          , (["QuotesSometimes"], "foo bar", "\"foo bar\"")
-          , (["QuotesNever"]    , "foo bar", "foo bar")
+          [ (["quotes-always"]   , "foo"    , "\"foo\"")
+          , (["quotes-sometimes"], "foo"    , "foo")
+          , (["quotes-never"]    , "foo"    , "foo")
+          , (["quotes-always"]   , "foo-bar", "\"foo-bar\"")
+          , (["quotes-sometimes"], "foo-bar", "foo-bar")
+          , (["quotes-never"]    , "foo-bar", "foo-bar")
+          , (["quotes-always"]   , "foo bar", "\"foo bar\"")
+          , (["quotes-sometimes"], "foo bar", "\"foo bar\"")
+          , (["quotes-never"]    , "foo bar", "foo bar")
           ]
 
     describe "String" $ do
@@ -194,7 +194,7 @@ main = Hspec.hspec $ do
           80
           ( gist
               [ Gist.strConfig @Map "hide-keys"
-              , Gist.strConfig @IsString "QuotesNever"
+              , Gist.strConfig @IsString "quotes-never"
               ]
           $ Map.fromList [(3.2 :: Double, ["foo" :: String, "foo bar"])]
           )
@@ -215,8 +215,8 @@ main = Hspec.hspec $ do
           ( gist
               [ Gist.config @Map
                   ( mempty
-                  , pure $ Gist.strConfig @IsString "QuotesNever"
-                  , pure $ Gist.strConfig @IsString "QuotesAlways"
+                  , pure $ Gist.strConfig @IsString "quotes-never"
+                  , pure $ Gist.strConfig @IsString "quotes-always"
                   )
               ]
           $ Map.fromList [("foo bar" :: String, "baz" :: String)]

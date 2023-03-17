@@ -183,6 +183,8 @@ instance Gist ()
 instance Configurable ()
 
 instance Gist Int
+
+-- | TODO: allow comma and underscore separation.
 instance Configurable Int
 
 instance Gist Float where
@@ -203,6 +205,7 @@ instance Configurable Double where
   type ConfigFor Double = ConfigFor Floating
   parseConfigFor = parseConfigFor @Floating
 
+-- | TODO: allow comma and underscore separation.
 instance Configurable Floating where
   type ConfigFor Floating = Last Printf.FieldFormat
   parseConfigFor = go
@@ -267,12 +270,13 @@ charWantsQuotes c =
        `notElem` [Char.ConnectorPunctuation, Char.DashPunctuation]
        )
 
+-- | TODO: allow (default to?) C-style escaping or similar.
 instance Configurable IsString where
   type ConfigFor IsString = Last ConfStrQuotes
   parseConfigFor = \case
-    "QuotesAlways"    -> Right $ pure ConfStrQuotesAlways
-    "QuotesNever"     -> Right $ pure ConfStrQuotesNever
-    "QuotesSometimes" -> Right $ pure ConfStrQuotesSometimes
+    "quotes-always"    -> Right $ pure ConfStrQuotesAlways
+    "quotes-never"     -> Right $ pure ConfStrQuotesNever
+    "quotes-sometimes" -> Right $ pure ConfStrQuotesSometimes
     _                 -> Left "unknown quote specifier"
 
 instance Gist Char where
