@@ -21,6 +21,7 @@ description:         Please see the README on GitHub at <https://github.com/Chic
 
 default-extensions:
 - AllowAmbiguousTypes
+- DataKinds
 - DefaultSignatures
 - DeriveFunctor
 - DerivingStrategies
@@ -34,6 +35,7 @@ default-extensions:
 - TupleSections
 - TypeApplications
 - TypeFamilies
+- TypeOperators
 - UndecidableInstances
 
 ghc-options:

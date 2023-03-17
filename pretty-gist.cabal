@@ -32,6 +32,7 @@ library
       src
   default-extensions:
       AllowAmbiguousTypes
+      DataKinds
       DefaultSignatures
       DeriveFunctor
       DerivingStrategies
@@ -45,6 +46,7 @@ library
       TupleSections
       TypeApplications
       TypeFamilies
+      TypeOperators
       UndecidableInstances
   ghc-options: -Wall -Wmissing-deriving-strategies -Wredundant-constraints
   build-depends:
@@ -63,6 +65,7 @@ test-suite pretty-gist-test
       test
   default-extensions:
       AllowAmbiguousTypes
+      DataKinds
       DefaultSignatures
       DeriveFunctor
       DerivingStrategies
@@ -76,6 +79,7 @@ test-suite pretty-gist-test
       TupleSections
       TypeApplications
       TypeFamilies
+      TypeOperators
       UndecidableInstances
   ghc-options: -Wall -Wmissing-deriving-strategies -Wredundant-constraints -threaded -rtsopts -with-rtsopts=-N
   build-depends:

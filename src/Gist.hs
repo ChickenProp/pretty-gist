@@ -7,7 +7,6 @@ module Gist
   , gist
   , ConfMap(..)
   , ConfStrQuotes(..)
-  , configLookup
   ) where
 
 import           Data.Bifunctor                 ( first )
@@ -49,7 +48,7 @@ class Configurable a => Gist a where
     -> Doc ann
   gistList' conf l =
     let (Last mTake, Last mSubConf) =
-          configLookup @[] conf <> configLookup @[a] conf
+          configLookups @( [] :&& [a] ) conf
         subConf = fromMaybe conf mSubConf
         elems = case mTake of
           Nothing -> map (gist' subConf) l
@@ -147,6 +146,49 @@ configLookup (UnsafeConfig m) =
       Nothing   -> error "Bad Dynamic saved in Config"
       Just conf -> conf
 
+-- We use `:&` and `:&&` for `configLookups`. We can't use type-level lists
+-- `@'[a, b]` because those are hetero-kinded, e.g. `'[ [], [Int] ]` is
+-- forbidden. We need them as separate types because otherwise we'd have
+-- overlapping instances
+--
+--     instance (Configurable a, Configurable b) => ConfigLookups (a :& b)
+--     instance (ConfigLookups a, Configurable b) => ConfigLookups (a :& b)
+
+data (:&) a b -- brittany doesn't like `a :& b`.
+infixl 5 :&
+data (:&&) a b -- brittany doesn't like `a :&& b`.
+infix 6 :&&
+
+-- | We can use this class to lookup configs for multiple types at once,
+-- provided they all have the same `ConfigFor`. Replace
+--
+--     configLookup @a conf
+--       <> configLookup @b conf
+--       <> configLookup @c conf
+--       <> ...
+--
+-- with
+--
+--     configLookups @(a :&& b :& c :& ...) conf
+class ConfigLookups as where
+  type ConfigLookupsResult as
+  configLookups :: Config -> ConfigLookupsResult as
+
+instance (Configurable a, Configurable b, ConfigFor a ~ ConfigFor b)
+  => ConfigLookups (a :&& b)
+ where
+  type ConfigLookupsResult (a :&& b) = ConfigFor a
+  configLookups conf = configLookup @a conf <> configLookup @b conf
+
+instance
+  ( Configurable a
+  , ConfigLookups as
+  , ConfigFor a ~ ConfigLookupsResult as
+  ) => ConfigLookups (as :& a)
+ where
+  type ConfigLookupsResult (as :& a) = ConfigFor a
+  configLookups conf = configLookups @as conf <> configLookup @a conf
+
 -- | Concatenates several configs into one before applying.
 --
 -- This lets us do `gist [strConfig ..., config ...]`. But maybe we want an
@@ -188,7 +230,7 @@ instance Gist Int
 instance Configurable Int
 
 instance Gist Float where
-  gist' conf = case configLookup @Floating conf <> configLookup @Float conf of
+  gist' conf = case configLookups @(Floating :&& Float) conf of
     Last Nothing  -> pretty
     Last (Just f) -> \d -> pretty $ Printf.formatRealFloat d f ""
 
@@ -197,7 +239,7 @@ instance Configurable Float where
   parseConfigFor = parseConfigFor @Floating
 
 instance Gist Double where
-  gist' conf = case configLookup @Floating conf <> configLookup @Double conf of
+  gist' conf = case configLookups @(Floating :&& Double) conf of
     Last Nothing  -> pretty
     Last (Just f) -> \d -> pretty $ Printf.formatRealFloat d f ""
 
@@ -277,14 +319,13 @@ instance Configurable IsString where
     "quotes-always"    -> Right $ pure ConfStrQuotesAlways
     "quotes-never"     -> Right $ pure ConfStrQuotesNever
     "quotes-sometimes" -> Right $ pure ConfStrQuotesSometimes
-    _                 -> Left "unknown quote specifier"
+    _                  -> Left "unknown quote specifier"
 
 instance Gist Char where
   gist' conf c =
     case
         fromLast ConfStrQuotesSometimes
-        $  configLookup @IsString conf
-        <> configLookup @Char conf
+          $ configLookups @(IsString :&& Char) conf
       of
         ConfStrQuotesAlways -> viaShow c
         ConfStrQuotesNever  -> pretty c
@@ -294,8 +335,7 @@ instance Gist Char where
   gistList' conf s =
     case
         fromLast ConfStrQuotesSometimes
-        $  configLookup @IsString conf
-        <> configLookup @String conf
+          $ configLookups @(IsString :&& String) conf
       of
         ConfStrQuotesAlways -> viaShow s
         ConfStrQuotesNever  -> pretty s
@@ -311,7 +351,7 @@ instance Configurable Char where
 
 instance Gist Text where
   gist' conf s =
-    let myConf = configLookup @IsString conf <> configLookup @Text conf
+    let myConf = configLookups @(IsString :&& Text) conf
     in  gist' (configInsert @String myConf conf) (Text.unpack s)
 
 instance Configurable Text where
@@ -321,11 +361,7 @@ instance Configurable Text where
 instance (Gist a, Gist b) => Gist (a, b) where
   gist' conf (a, b) = tupled
     [gist' (fromLast conf confA) a, gist' (fromLast conf confB) b]
-   where
-    (confA, confB) =
-      configLookup @(,) conf
-        <> configLookup @((,) a) conf
-        <> configLookup @(a, b) conf
+    where (confA, confB) = configLookups @((,) :&& ((,) a) :& (a, b)) conf
 
 instance (Typeable a, Typeable b) => Configurable (a, b) where
   type ConfigFor (a, b) = (Last Config, Last Config)
@@ -354,9 +390,7 @@ instance (Gist k, Gist v) => Gist (Map k v) where
   gist' conf m =
     let
       (ConfMap showKeys showVals, confK, confV) =
-        configLookup @Map conf
-          <> configLookup @(Map k) conf
-          <> configLookup @(Map k v) conf
+        configLookups @(Map :&& Map k :& Map k v) conf
       showKV (k, v) =
         (if fromLast True showKeys then gist' (fromLast conf confK) k else "_")
           <> ": "
