@@ -245,3 +245,7 @@ main = Hspec.hspec $ do
       numberedTest $ do
         layout 80 (gist config $ Right @Double @Double 3.2)
           `shouldBe` "Right 3.2"
+
+    numberedTest $ do
+      layout 80 (gist [] (Left (Left ()) :: Either (Either () ()) ()))
+          `shouldBe` "Left (Left ())"

@@ -32,13 +32,16 @@ import           Type.Reflection                ( SomeTypeRep(..)
 
 -- | A gist is a configurable pretty-print.
 class Configurable a => Gist a where
-  gist' :: Config -> a -> Doc ann
-  default gist'
-    :: (ConfigFor a ~ (), Pretty a) => Config -> a -> Doc ann
-  gist' conf = pretty
+  gistPrec' :: Int -> Config -> a -> Doc ann
+  default gistPrec'
+    :: (ConfigFor a ~ (), Pretty a) => Int -> Config -> a -> Doc ann
+  gistPrec' _ conf = pretty
    -- This clause avoids a "redundant constraint" warning, but shouldn't affect
    -- semantics (including laziness):
    where _x :: () = configLookup @a conf
+
+  gist' :: Config -> a -> Doc ann
+  gist' = gistPrec' 0
 
   gistList' :: Config -> [a] -> Doc ann
   default gistList'
@@ -207,7 +210,7 @@ config :: forall a . Configurable a => ConfigFor a -> Config
 config confFor = configInsert @a confFor mempty
 
 instance Gist a => Gist [a] where
-  gist' = gistList' @a
+  gistPrec' _ = gistList' @a
 
 instance Configurable a => Configurable [a] where
   type ConfigFor [a] = ConfigForList a
@@ -230,7 +233,7 @@ instance Gist Int
 instance Configurable Int
 
 instance Gist Float where
-  gist' conf = case configLookups @(Floating :&& Float) conf of
+  gistPrec' _ conf = case configLookups @(Floating :&& Float) conf of
     Last Nothing  -> pretty
     Last (Just f) -> \d -> pretty $ Printf.formatRealFloat d f ""
 
@@ -239,7 +242,7 @@ instance Configurable Float where
   parseConfigFor = parseConfigFor @Floating
 
 instance Gist Double where
-  gist' conf = case configLookups @(Floating :&& Double) conf of
+  gistPrec' _ conf = case configLookups @(Floating :&& Double) conf of
     Last Nothing  -> pretty
     Last (Just f) -> \d -> pretty $ Printf.formatRealFloat d f ""
 
@@ -322,7 +325,7 @@ instance Configurable IsString where
     _                  -> Left "unknown quote specifier"
 
 instance Gist Char where
-  gist' conf c =
+  gistPrec' _ conf c =
     case
         fromLast ConfStrQuotesSometimes
           $ configLookups @(IsString :&& Char) conf
@@ -350,7 +353,7 @@ instance Configurable Char where
   parseConfigForList = parseConfigFor @Char
 
 instance Gist Text where
-  gist' conf s = gist' (configInsert @String myConf conf) (Text.unpack s)
+  gistPrec' _ conf s = gist' (configInsert @String myConf conf) (Text.unpack s)
     where myConf = configLookups @(IsString :&& Text) conf
 
 instance Configurable Text where
@@ -358,7 +361,7 @@ instance Configurable Text where
   parseConfigFor = parseConfigFor @String
 
 instance (Gist a, Gist b) => Gist (a, b) where
-  gist' conf (a, b) = tupled
+  gistPrec' _ conf (a, b) = tupled
     [gist' (fromLast conf confA) a, gist' (fromLast conf confB) b]
     where (confA, confB) = configLookups @((,) :&& ((,) a) :& (a, b)) conf
 
@@ -386,7 +389,7 @@ instance Monoid ConfMap where
   mempty = ConfMap mempty mempty
 
 instance (Gist k, Gist v) => Gist (Map k v) where
-  gist' conf m =
+  gistPrec' _ conf m =
     group
       $ encloseSep (flatAlt "{ " "{") (flatAlt " }" "}") ", "
       $ (showKV <$> Map.toList m)
@@ -417,9 +420,9 @@ instance Configurable Map where
     _           -> Left "Expected hide-keys or hide-vals"
 
 instance (Gist a, Gist b) => Gist (Either a b) where
-  gist' conf = \case
-    Left  a -> "Left" <+> gist' (fromLast conf confL) a
-    Right a -> "Right" <+> gist' (fromLast conf confR) a
+  gistPrec' prec conf = parensIfPrecGT 10 prec . \case
+    Left  a -> "Left" <+> gistPrec' 11 (fromLast conf confL) a
+    Right a -> "Right" <+> gistPrec' 11 (fromLast conf confR) a
    where
     (confL, confR) = configLookups @(Either :&& Either a :& Either a b) conf
 
@@ -439,3 +442,6 @@ fromLast :: a -> Last a -> a
 fromLast def = \case
   Last Nothing  -> def
   Last (Just x) -> x
+
+parensIfPrecGT :: Int -> Int -> Doc ann -> Doc ann
+parensIfPrecGT comparison prec = if prec > comparison then parens else id
