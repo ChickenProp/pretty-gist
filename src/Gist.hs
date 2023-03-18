@@ -2,6 +2,7 @@ module Gist
   ( Gist(..)
   , Configurable(..)
   , Config(..)
+  , Prettily(..)
   , config
   , strConfig
   , gist
@@ -32,13 +33,10 @@ import           Type.Reflection                ( SomeTypeRep(..)
 
 -- | A gist is a configurable pretty-print.
 class Configurable a => Gist a where
+  {-# MINIMAL gist' | gistPrec' #-}
+
   gistPrec' :: Int -> Config -> a -> Doc ann
-  default gistPrec'
-    :: (ConfigFor a ~ (), Pretty a) => Int -> Config -> a -> Doc ann
-  gistPrec' _ conf = pretty
-   -- This clause avoids a "redundant constraint" warning, but shouldn't affect
-   -- semantics (including laziness):
-   where _x :: () = configLookup @a conf
+  gistPrec' _ = gist'
 
   gist' :: Config -> a -> Doc ann
   gist' = gistPrec' 0
@@ -192,6 +190,19 @@ instance
   type ConfigLookupsResult (as :& a) = ConfigFor a
   configLookups conf = configLookups @as conf <> configLookup @a conf
 
+-- | For types with a `Pretty` instance, you can derive `Gist` and
+-- `Configurable` via `Prettily`. The resulting instances will have no
+-- configuration.
+newtype Prettily a = Prettily a
+
+instance (Configurable a, Pretty a, ConfigFor a ~ ()) => Gist (Prettily a) where
+  gistPrec' _ conf (Prettily a) = pretty a
+    -- This clause avoids a "redundant constraint" warning, but shouldn't affect
+    -- semantics (including laziness):
+    where _x :: () = configLookup @a conf
+
+instance Typeable a => Configurable (Prettily a)
+
 -- | Concatenates several configs into one before applying.
 --
 -- This lets us do `gist [strConfig ..., config ...]`. But maybe we want an
@@ -224,13 +235,12 @@ instance Configurable [] where
       Nothing -> Left "Expected \"show-first (int)\""
     _ -> Left "Expected \"show-first (int)\""
 
-instance Gist ()
-instance Configurable ()
-
-instance Gist Int
+deriving via (Prettily ()) instance Gist ()
+deriving via (Prettily ()) instance Configurable ()
 
 -- | TODO: allow comma and underscore separation.
-instance Configurable Int
+deriving via (Prettily Int) instance Gist Int
+deriving via (Prettily Int) instance Configurable Int
 
 instance Gist Float where
   gistPrec' _ conf = case configLookups @(Floating :&& Float) conf of

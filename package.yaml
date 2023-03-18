@@ -25,6 +25,7 @@ default-extensions:
 - DefaultSignatures
 - DeriveFunctor
 - DerivingStrategies
+- DerivingVia
 - FlexibleContexts
 - FlexibleInstances
 - GADTs
@@ -32,6 +33,7 @@ default-extensions:
 - OverloadedStrings
 - PolyKinds
 - ScopedTypeVariables
+- StandaloneDeriving
 - TupleSections
 - TypeApplications
 - TypeFamilies
