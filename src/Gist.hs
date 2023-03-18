@@ -350,9 +350,8 @@ instance Configurable Char where
   parseConfigForList = parseConfigFor @Char
 
 instance Gist Text where
-  gist' conf s =
-    let myConf = configLookups @(IsString :&& Text) conf
-    in  gist' (configInsert @String myConf conf) (Text.unpack s)
+  gist' conf s = gist' (configInsert @String myConf conf) (Text.unpack s)
+    where myConf = configLookups @(IsString :&& Text) conf
 
 instance Configurable Text where
   type ConfigFor Text = ConfigFor String
@@ -388,26 +387,25 @@ instance Monoid ConfMap where
 
 instance (Gist k, Gist v) => Gist (Map k v) where
   gist' conf m =
-    let
-      (ConfMap showKeys showVals, confK, confV) =
-        configLookups @(Map :&& Map k :& Map k v) conf
-      showKV (k, v) =
-        (if fromLast True showKeys then gist' (fromLast conf confK) k else "_")
-          <> ": "
-          <> (if fromLast True showVals
-               then gist' (fromLast conf confV) v
-               else "_"
-             )
-    in
-      group
+    group
       $ encloseSep (flatAlt "{ " "{") (flatAlt " }" "}") ", "
       $ (showKV <$> Map.toList m)
+   where
+    (ConfMap showKeys showVals, confK, confV) =
+      configLookups @(Map :&& Map k :& Map k v) conf
+    showKV (k, v) =
+      (if fromLast True showKeys then gist' (fromLast conf confK) k else "_")
+        <> ": "
+        <> (if fromLast True showVals
+             then gist' (fromLast conf confV) v
+             else "_"
+           )
 
 instance (Typeable k, Typeable v) => Configurable (Map k v) where
   type ConfigFor (Map k v) = ConfigFor Map
   parseConfigFor = parseConfigFor @Map
 
-instance (Typeable k) => Configurable (Map k) where
+instance Typeable k => Configurable (Map k) where
   type ConfigFor (Map k) = ConfigFor Map
   parseConfigFor = parseConfigFor @Map
 
@@ -417,6 +415,25 @@ instance Configurable Map where
     "hide-keys" -> Right (ConfMap (pure False) mempty, mempty, mempty)
     "hide-vals" -> Right (ConfMap mempty (pure False), mempty, mempty)
     _           -> Left "Expected hide-keys or hide-vals"
+
+instance (Gist a, Gist b) => Gist (Either a b) where
+  gist' conf = \case
+    Left  a -> "Left" <+> gist' (fromLast conf confL) a
+    Right a -> "Right" <+> gist' (fromLast conf confR) a
+   where
+    (confL, confR) = configLookups @(Either :&& Either a :& Either a b) conf
+
+instance (Typeable a, Typeable b) => Configurable (Either a b) where
+  type ConfigFor (Either a b) = ConfigFor Either
+  parseConfigFor = parseConfigFor @Either
+
+instance Typeable a => Configurable (Either a) where
+  type ConfigFor (Either a) = ConfigFor Either
+  parseConfigFor = parseConfigFor @Either
+
+instance Configurable Either where
+  type ConfigFor Either = (Last Config, Last Config)
+  parseConfigFor _ = Left "Cannot parse config for Either"
 
 fromLast :: a -> Last a -> a
 fromLast def = \case

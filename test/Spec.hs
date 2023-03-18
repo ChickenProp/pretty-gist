@@ -126,88 +126,84 @@ main = Hspec.hspec $ do
       layout 80 (gist [Gist.strConfig @[] "show-first 3"] [(), (), (), (), ()])
         `shouldBe` "[(), (), (), ...]"
 
-    numberedTest $ do
-      layout
-          80
-          (gist
-            [Gist.strConfig @[] "show-first 3", Gist.strConfig @Double ".2f"]
-            [1.1 :: Double, 1.11, 1.111, 1.1111]
-          )
-        `shouldBe` "[1.10, 1.11, 1.11, ...]"
+    do
+      let arr :: [Double] = [1.1, 1.11, 1.111, 1.1111]
 
-    numberedTest $ do
-      layout
-          10
-          (gist
-            [Gist.strConfig @[] "show-first 3", Gist.strConfig @Double ".2f"]
-            [1.1 :: Double, 1.11, 1.111, 1.1111]
-          )
-        `shouldBe` Text.intercalate
-                     "\n"
-                     ["[ 1.10", ", 1.11", ", 1.11", ", ... ]"]
+      numberedTest $ do
+        layout
+            80
+            (gist
+              [Gist.strConfig @[] "show-first 3", Gist.strConfig @Double ".2f"]
+              arr
+            )
+          `shouldBe` "[1.10, 1.11, 1.11, ...]"
 
-    numberedTest $ do
-      layout
-          80
-          (gist
-            [ Gist.strConfig @Double ".2f"
-            , Gist.config @[] (mempty, pure $ Gist.strConfig @Double ".3f")
-            ]
-            [1.1 :: Double, 1.11, 1.111, 1.1111]
-          )
-        `shouldBe` "[1.100, 1.110, 1.111, 1.111]"
+      numberedTest $ do
+        layout
+            10
+            (gist
+              [Gist.strConfig @[] "show-first 3", Gist.strConfig @Double ".2f"]
+              arr
+            )
+          `shouldBe` Text.intercalate
+                       "\n"
+                       ["[ 1.10", ", 1.11", ", 1.11", ", ... ]"]
 
-    numberedTest $ do
-      layout
-          80
-          (gist
-            [ Gist.strConfig @Double ".2f"
-            , Gist.config @[] (mempty, pure $ Gist.strConfig @Double ".3f")
-            ]
-            (1.1 :: Double, [1.1 :: Double, 1.11, 1.111, 1.1111])
-          )
-        `shouldBe` "(1.10, [1.100, 1.110, 1.111, 1.111])"
+      numberedTest $ do
+        layout
+            80
+            (gist
+              [ Gist.strConfig @Double ".2f"
+              , Gist.config @[] (mempty, pure $ Gist.strConfig @Double ".3f")
+              ]
+              arr
+            )
+          `shouldBe` "[1.100, 1.110, 1.111, 1.111]"
 
-    numberedTest $ do
-      layout
-          80
-          ( gist []
-          $ Map.fromList [(3.2 :: Double, ["foo" :: String, "foo bar"])]
-          )
-        `shouldBe` "{3.2: [foo, \"foo bar\"]}"
+      numberedTest $ do
+        layout
+            80
+            (gist
+              [ Gist.strConfig @Double ".2f"
+              , Gist.config @[] (mempty, pure $ Gist.strConfig @Double ".3f")
+              ]
+              (1.1 :: Double, arr)
+            )
+          `shouldBe` "(1.10, [1.100, 1.110, 1.111, 1.111])"
 
-    numberedTest $ do
-      layout
-          5
-          ( gist []
-          $ Map.fromList [(3.2 :: Double, ["foo" :: String, "foo bar"])]
-          )
-        `shouldBe` Text.intercalate
-                     "\n"
-                     [ -- comment to force multi-line layout
-                       "{ 3.2: [ foo"
-                     , "       , \"foo bar\" ] }"
-                     ]
+    do
+      let map_ = Map.fromList [(3.2 :: Double, ["foo" :: String, "foo bar"])]
 
-    numberedTest $ do
-      layout
-          80
-          ( gist
+      numberedTest $ do
+        layout 80 (gist [] map_) `shouldBe` "{3.2: [foo, \"foo bar\"]}"
+
+      numberedTest $ do
+        layout 5 (gist [] map_) `shouldBe` Text.intercalate
+          "\n"
+          [ -- comment to force multi-line layout
+            "{ 3.2: [ foo"
+          , "       , \"foo bar\" ] }"
+          ]
+
+      numberedTest $ do
+        layout
+            80
+            (gist
               [ Gist.strConfig @Map "hide-keys"
               , Gist.strConfig @IsString "quotes-never"
               ]
-          $ Map.fromList [(3.2 :: Double, ["foo" :: String, "foo bar"])]
-          )
-        `shouldBe` "{_: [foo, foo bar]}"
+              map_
+            )
+          `shouldBe` "{_: [foo, foo bar]}"
 
-    numberedTest $ do
-      layout
-          80
-          ( gist
+      numberedTest $ do
+        layout
+            80
+            (gist
               [Gist.strConfig @Map "hide-keys", Gist.strConfig @Map "hide-vals"]
-          $ Map.fromList [(3.2 :: Double, ["foo" :: String, "foo bar"])]
-          )
-        `shouldBe` "{_: _}"
+              map_
+            )
+          `shouldBe` "{_: _}"
 
     numberedTest $ do
       layout
@@ -222,3 +218,30 @@ main = Hspec.hspec $ do
           $ Map.fromList [("foo bar" :: String, "baz" :: String)]
           )
         `shouldBe` "{foo bar: \"baz\"}"
+
+    do
+      let
+        config =
+          [Gist.strConfig @Double ".2f", Gist.strConfig @String "quotes-always"]
+
+      numberedTest $ do
+        layout 80 (gist config $ Left @Double @String 3.2)
+          `shouldBe` "Left 3.20"
+
+      numberedTest $ do
+        layout 80 (gist config $ Right @Double @String "foo")
+          `shouldBe` "Right \"foo\""
+
+    do
+      let config =
+            [ Gist.strConfig @Double ".2f"
+            , Gist.config @Either (mempty, pure mempty)
+            ]
+
+      numberedTest $ do
+        layout 80 (gist config $ Left @Double @Double 3.2)
+          `shouldBe` "Left 3.20"
+
+      numberedTest $ do
+        layout 80 (gist config $ Right @Double @Double 3.2)
+          `shouldBe` "Right 3.2"
