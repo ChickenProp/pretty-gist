@@ -260,7 +260,8 @@ instance Configurable Double where
   type ConfigFor Double = ConfigFor Floating
   parseConfigFor = parseConfigFor @Floating
 
--- | TODO: allow comma and underscore separation.
+-- | TODO: allow comma and underscore separation. Also, there's no way to revert
+-- to the default behavior. And there's no instance for `Show FieldFormat`.
 instance Configurable Floating where
   type ConfigFor Floating = Last Printf.FieldFormat
   parseConfigFor = go

@@ -66,21 +66,38 @@ main = Hspec.hspec $ do
                 layout width (gist (context <$> args) input) `shouldBe` expected
 
   describe "gisting stringy things" $ do
-    let tests :: IsString a => [([String], a, Text)]
+    let tests :: IsString a => [([String], (a, Text), (Char, Text))]
         tests =
-          [ (["quotes-always"]   , "foo"    , "\"foo\"")
-          , (["quotes-sometimes"], "foo"    , "foo")
-          , (["quotes-never"]    , "foo"    , "foo")
-          , (["quotes-always"]   , "foo-bar", "\"foo-bar\"")
-          , (["quotes-sometimes"], "foo-bar", "foo-bar")
-          , (["quotes-never"]    , "foo-bar", "foo-bar")
-          , (["quotes-always"]   , "foo bar", "\"foo bar\"")
-          , (["quotes-sometimes"], "foo bar", "\"foo bar\"")
-          , (["quotes-never"]    , "foo bar", "foo bar")
+          [ ([]                  , ("foo", "foo")            , ('a', "a"))
+          , (["quotes-always"]   , ("foo", "\"foo\"")        , ('a', "'a'"))
+          , (["quotes-sometimes"], ("foo", "foo")            , ('a', "a"))
+          , (["quotes-never"]    , ("foo", "foo")            , ('a', "a"))
+          , ([]                  , ("foo-bar", "foo-bar")    , ('-', "-"))
+          , (["quotes-always"]   , ("foo-bar", "\"foo-bar\""), ('-', "'-'"))
+          , (["quotes-sometimes"], ("foo-bar", "foo-bar")    , ('-', "-"))
+          , (["quotes-never"]    , ("foo-bar", "foo-bar")    , ('-', "-"))
+          , ([]                  , ("foo bar", "\"foo bar\""), (' ', "' '"))
+          , (["quotes-always"]   , ("foo bar", "\"foo bar\""), (' ', "' '"))
+          , (["quotes-sometimes"], ("foo bar", "\"foo bar\""), (' ', "' '"))
+          , (["quotes-never"]    , ("foo bar", "foo bar")    , (' ', " "))
           ]
 
+    describe "Char" $ do
+      for_ (tests @String) $ \(args, _, (input, expected)) -> do
+        let desc =
+              concat [show args, " / ", show input, " === ", show expected]
+        it desc $ do
+          QC.forAll
+              ((,) <$> QC.arbitrary <*> QC.elements
+                [ ("IsString", QC.Blind $ Gist.strConfig @IsString)
+                , ("Char"    , QC.Blind $ Gist.strConfig @Char)
+                ]
+              )
+            $ \(width, (_ :: String, QC.Blind context)) ->
+                layout width (gist (context <$> args) input) `shouldBe` expected
+
     describe "String" $ do
-      for_ tests $ \(args, input :: String, expected) -> do
+      for_ tests $ \(args, (input :: String, expected), _) -> do
         let desc =
               concat [show args, " / ", show input, " === ", show expected]
         it desc $ do
@@ -94,7 +111,7 @@ main = Hspec.hspec $ do
                 layout width (gist (context <$> args) input) `shouldBe` expected
 
     describe "Text" $ do
-      for_ tests $ \(args, input :: Text, expected) -> do
+      for_ tests $ \(args, (input :: Text, expected), _) -> do
         let desc =
               concat [show args, " / ", show input, " === ", show expected]
         it desc $ do
@@ -248,4 +265,4 @@ main = Hspec.hspec $ do
 
     numberedTest $ do
       layout 80 (gist [] (Left (Left ()) :: Either (Either () ()) ()))
-          `shouldBe` "Left (Left ())"
+        `shouldBe` "Left (Left ())"
