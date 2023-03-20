@@ -266,3 +266,43 @@ main = Hspec.hspec $ do
     numberedTest $ do
       layout 80 (gist [] (Left (Left ()) :: Either (Either () ()) ()))
         `shouldBe` "Left (Left ())"
+
+    numberedTest $ do
+      layout 80 (gist [] $ Just ()) `shouldBe` "()"
+    numberedTest $ do
+      layout 80 (gist [] $ Nothing @()) `shouldBe` "_"
+    numberedTest $ do
+      layout 80 (gist [] $ Just $ Just ()) `shouldBe` "()"
+    numberedTest $ do
+      layout 80 (gist [] $ Just $ Nothing @()) `shouldBe` "_"
+    numberedTest $ do
+      layout 80 (gist [] $ Nothing @(Maybe ())) `shouldBe` "_"
+
+    do
+      let conf = [Gist.strConfig @Maybe "show-constructors"]
+      numberedTest $ do
+        layout 80 (gist conf $ Just ()) `shouldBe` "Just ()"
+      numberedTest $ do
+        layout 80 (gist conf $ Just $ Just ()) `shouldBe` "Just (Just ())"
+      numberedTest $ do
+        layout 80 (gist conf $ Nothing @()) `shouldBe` "Nothing"
+      numberedTest $ do
+        layout 80 (gist conf $ Nothing @(Maybe ())) `shouldBe` "Nothing"
+      numberedTest $ do
+        layout 80 (gist conf $ Just $ Nothing @()) `shouldBe` "Just Nothing"
+
+    do
+      let conf =
+            [ Gist.strConfig @Maybe "show-constructors"
+            , Gist.config @Maybe (mempty, pure mempty)
+            ]
+      numberedTest $ do
+        layout 80 (gist conf $ Just ()) `shouldBe` "Just ()"
+      numberedTest $ do
+        layout 80 (gist conf $ Just $ Just ()) `shouldBe` "Just ()"
+      numberedTest $ do
+        layout 80 (gist conf $ Nothing @()) `shouldBe` "Nothing"
+      numberedTest $ do
+        layout 80 (gist conf $ Nothing @(Maybe ())) `shouldBe` "Nothing"
+      numberedTest $ do
+        layout 80 (gist conf $ Just $ Nothing @()) `shouldBe` "Just _"

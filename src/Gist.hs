@@ -235,6 +235,29 @@ instance Configurable [] where
       Nothing -> Left "Expected \"show-first (int)\""
     _ -> Left "Expected \"show-first (int)\""
 
+instance Gist a => Gist (Maybe a) where
+  gistPrec' prec conf val = if fromLast False showConstructors
+    then case val of
+      Nothing -> "Nothing"
+      Just v  -> parensIfPrecGT 10 prec $ "Just" <+> gistPrec' 11 subConf v
+    else case val of
+      Nothing -> "_"
+      Just v  -> gistPrec' prec subConf v
+   where
+    (showConstructors, lSubConf) = configLookups @(Maybe :&& Maybe a) conf
+    subConf                      = fromLast conf lSubConf
+
+instance Typeable a => Configurable (Maybe a) where
+  type ConfigFor (Maybe a) = ConfigFor Maybe
+  parseConfigFor = parseConfigFor @Maybe
+
+instance Configurable Maybe where
+  type ConfigFor Maybe = (Last Bool, Last Config)
+  parseConfigFor s = case s of
+    "show-constructors" -> Right (pure True, mempty)
+    "hide-constructors" -> Right (pure False, mempty)
+    _ -> Left "Expected \"show-constructors\" or \"hide-constructors\""
+
 deriving via (Prettily ()) instance Gist ()
 deriving via (Prettily ()) instance Configurable ()
 
