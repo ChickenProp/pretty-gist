@@ -124,17 +124,38 @@ main = Hspec.hspec $ do
             $ \(width, (_ :: String, QC.Blind context)) ->
                 layout width (gist (context <$> args) input) `shouldBe` expected
 
-  describe "Bunch of tests" $ do
-    -- It's a hassle to come up with descriptive test names, but convenient for
-    -- them all to be unique. This gives them numbers. We can't search for the
-    -- test name in source if something fails, but the failure message has a
-    -- line number attached.
-    counter <- Hspec.Spec.runIO $ IORef.newIORef (0 :: Int)
-    let numberedTest test = do
-          n <- Hspec.Spec.runIO $ IORef.atomicModifyIORef' counter $ \n ->
-            (n + 1, n)
-          Hspec.Spec.fromSpecList [Hspec.Spec.specItem ("test " <> show n) test]
+  countingTests "Circular configs" $ \numberedTest -> do
+    numberedTest $ do
+      -- The outer and inner lists only show 1 element each, the middle one
+      -- shows all.
+      let config1 = Gist.config @[] (pure 1, pure config2)
+          config2 = Gist.config @[] (mempty, pure config1)
+      layout 1 (gist [config1] [[[(), ()], [(), ()]], [[(), ()], [(), ()]]])
+        `shouldBe` Text.intercalate
+                     "\n"
+                     [ "[ [ [ ()"
+                     , "    , ... ]"
+                     , "  , [ ()"
+                     , "    , ... ] ]"
+                     , ", ... ]"
+                     ]
 
+    numberedTest $ do
+      -- The outer list shows all elements, the others show just 1.
+      let config = Gist.config @[]
+            (mempty, pure $ config <> Gist.strConfig @[] "show-first 1")
+      layout 1 (gist [config] [[[(), ()], [(), ()]], [[(), ()], [(), ()]]])
+        `shouldBe` Text.intercalate
+                     "\n"
+                     [ "[ [ [ ()"
+                     , "    , ... ]"
+                     , "  , ... ]"
+                     , ", [ [ ()"
+                     , "    , ... ]"
+                     , "  , ... ] ]"
+                     ]
+
+  countingTests "Bunch of tests" $ \numberedTest -> do
     numberedTest $ do
       layout 80 (gist [Gist.strConfig @[] "show-first 3"] [(), (), ()])
         `shouldBe` "[(), (), ()]"
@@ -306,3 +327,33 @@ main = Hspec.hspec $ do
         layout 80 (gist conf $ Nothing @(Maybe ())) `shouldBe` "Nothing"
       numberedTest $ do
         layout 80 (gist conf $ Just $ Nothing @()) `shouldBe` "Just _"
+
+-- | It's a hassle to come up with descriptive test names, but convenient for
+-- them all to be unique. This lets us give them numbers. We can't search for
+-- the test name in source if something fails, but the failure message has a
+-- line number attached.
+--
+-- Usage:
+--
+--     countingTests "foo" $ \numberedTest -> do
+--       numberedTest someTest
+--       numberedTest someTest
+--
+-- is equivalent to
+--
+--     describe "foo" $ do
+--       it "test 1" someTest
+--       it "test 2" someTest
+countingTests
+  :: Hspec.Example a
+  => String
+  -> ((a -> Hspec.SpecWith (Hspec.Arg a)) -> Hspec.SpecWith a2)
+  -> Hspec.SpecWith a2
+countingTests desc withNumberedTest = describe desc $ do
+  counter <- Hspec.Spec.runIO $ IORef.newIORef (0 :: Int)
+  let numberedTest test = do
+        n <- Hspec.Spec.runIO $ IORef.atomicModifyIORef' counter $ \n ->
+          (n + 1, n)
+        Hspec.Spec.fromSpecList [Hspec.Spec.specItem ("test " <> show n) test]
+
+  withNumberedTest numberedTest
