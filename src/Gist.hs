@@ -107,8 +107,15 @@ instance Ord SomeConfigurable where
   SomeConfigurable a `compare` SomeConfigurable b =
     SomeTypeRep a `compare` SomeTypeRep b
 
+deriving via (Showily SomeConfigurable) instance Gist SomeConfigurable
+deriving via (Showily SomeConfigurable) instance Configurable SomeConfigurable
+
+deriving via (Showily Dyn.Dynamic) instance Gist Dyn.Dynamic
+deriving via (Showily Dyn.Dynamic) instance Configurable Dyn.Dynamic
+
 newtype Config =
   UnsafeConfig { unsafeUnConfig :: Map SomeConfigurable Dyn.Dynamic }
+  deriving stock Show
 
 instance Semigroup Config where
   UnsafeConfig m1 <> UnsafeConfig m2 = UnsafeConfig $ Map.unionWithKey f m1 m2
@@ -134,6 +141,11 @@ instance Semigroup Config where
 
 instance Monoid Config where
   mempty = UnsafeConfig mempty
+
+instance Gist Config where
+  gistPrec' prec conf (UnsafeConfig m) = gistPrec' prec conf m
+
+instance Configurable Config
 
 configInsert :: forall a . Configurable a => ConfigFor a -> Config -> Config
 configInsert confFor (UnsafeConfig m) = UnsafeConfig
@@ -196,12 +208,18 @@ instance
 newtype Prettily a = Prettily a
 
 instance (Configurable a, Pretty a, ConfigFor a ~ ()) => Gist (Prettily a) where
-  gistPrec' _ conf (Prettily a) = pretty a
-    -- This clause avoids a "redundant constraint" warning, but shouldn't affect
-    -- semantics (including laziness):
-    where _x :: () = configLookup @a conf
+  gistPrec' _ _ (Prettily a) = pretty a
 
 instance Typeable a => Configurable (Prettily a)
+
+-- | For types with a `Show` instance, you can derive `Gist` and `Configurable`
+-- via `Showily`. The resulting instances will have no configuration.
+newtype Showily a = Showily a
+
+instance (Configurable a, Show a, ConfigFor a ~ ()) => Gist (Showily a) where
+  gistPrec' prec _ (Showily a) = pretty $ showsPrec prec a ""
+
+instance Typeable a => Configurable (Showily a)
 
 -- | Concatenates several configs into one before applying.
 --

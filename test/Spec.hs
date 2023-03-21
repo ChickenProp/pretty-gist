@@ -328,6 +328,24 @@ main = Hspec.hspec $ do
       numberedTest $ do
         layout 80 (gist conf $ Just $ Nothing @()) `shouldBe` "Just _"
 
+    numberedTest $ do
+      -- This could probably look better, the Dynamics in particular.
+      layout
+          80
+          (gist
+            []
+            (  Gist.config @[] mempty
+            <> Gist.config @Maybe mempty
+            <> Gist.config @() mempty
+            )
+          )
+        `shouldBe` Text.intercalate
+                     "\n"
+                     [ "{ Maybe: <<((Last Bool),(Last Config))>>"
+                     , ", (): <<()>>"
+                     , ", []: <<((Last Int),(Last Config))>> }"
+                     ]
+
 -- | It's a hassle to come up with descriptive test names, but convenient for
 -- them all to be unique. This lets us give them numbers. We can't search for
 -- the test name in source if something fails, but the failure message has a
