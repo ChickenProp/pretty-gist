@@ -13,10 +13,10 @@ module Gist
 import           Data.Bifunctor                 ( first )
 import qualified Data.Char                     as Char
 import qualified Data.Dynamic                  as Dyn
+import           Data.Functor                   ( (<&>) )
 import           Data.Kind                      ( Type )
 import qualified Data.Map.Strict               as Map
 import           Data.Map.Strict                ( Map )
-import           Data.Maybe                     ( fromMaybe )
 import           Data.Monoid                    ( Last(..) )
 import           Data.String                    ( IsString )
 import qualified Data.Text                     as Text
@@ -43,15 +43,15 @@ class Configurable a => Gist a where
 
   gistList' :: Config -> [a] -> Doc ann
   default gistList'
-    :: (ConfigForList a ~ (Last Int, Last Config))
+    :: (ConfigForList a ~ (Last (Maybe Int), Last Config))
     => Config
     -> [a]
     -> Doc ann
   gistList' conf l =
-    let (Last mTake, Last mSubConf) =
+    let (lTake, lSubConf) =
           configLookups @( [] :&& [a] ) conf
-        subConf = fromMaybe conf mSubConf
-        elems = case mTake of
+        subConf = fromLast conf lSubConf
+        elems = case fromLast Nothing lTake of
           Nothing -> map (gist' subConf) l
           Just n  -> case splitAt n l of
             (start, []   ) -> map (gist' subConf) start
@@ -89,7 +89,7 @@ class
   -- If we replace this constrant with `ConfigForList a ~ ConfigFor []`, we get
   -- compile failures for some reason.
   default parseConfigForList
-    :: ConfigForList a ~ (Last Int, Last Config)
+    :: ConfigForList a ~ (Last (Maybe Int), Last Config)
     => String
     -> Either String (ConfigForList a)
   parseConfigForList = parseConfigFor @[]
@@ -245,11 +245,12 @@ instance Configurable a => Configurable [a] where
   type ConfigFor [a] = ConfigForList a
   parseConfigFor = parseConfigForList @a
 
+-- | TODO: no way in strConfig to reset to default behavior.
 instance Configurable [] where
-  type ConfigFor [] = (Last Int, Last Config)
+  type ConfigFor [] = (Last (Maybe Int), Last Config)
   parseConfigFor s = case words s of
     ["show-first", n] -> case readMaybe n of
-      Just n' -> Right (pure n', mempty)
+      Just n' -> Right (pure (Just n'), mempty)
       Nothing -> Left "Expected \"show-first (int)\""
     _ -> Left "Expected \"show-first (int)\""
 
@@ -284,37 +285,41 @@ deriving via (Prettily Int) instance Gist Int
 deriving via (Prettily Int) instance Configurable Int
 
 instance Gist Float where
-  gistPrec' _ conf = case configLookups @(Floating :&& Float) conf of
-    Last Nothing  -> pretty
-    Last (Just f) -> \d -> pretty $ Printf.formatRealFloat d f ""
+  gistPrec' _ conf =
+    case fromLast Nothing $ configLookups @(Floating :&& Float) conf of
+      Nothing -> pretty
+      Just f  -> \d -> pretty $ Printf.formatRealFloat d f ""
 
 instance Configurable Float where
   type ConfigFor Float = ConfigFor Floating
   parseConfigFor = parseConfigFor @Floating
 
 instance Gist Double where
-  gistPrec' _ conf = case configLookups @(Floating :&& Double) conf of
-    Last Nothing  -> pretty
-    Last (Just f) -> \d -> pretty $ Printf.formatRealFloat d f ""
+  gistPrec' _ conf =
+    case fromLast Nothing $ configLookups @(Floating :&& Double) conf of
+      Nothing -> pretty
+      Just f  -> \d -> pretty $ Printf.formatRealFloat d f ""
 
 instance Configurable Double where
   type ConfigFor Double = ConfigFor Floating
   parseConfigFor = parseConfigFor @Floating
 
--- | TODO: allow comma and underscore separation. Also, there's no way to revert
--- to the default behavior. And there's no instance for `Show FieldFormat`.
+-- | TODO: allow comma and underscore separation. Also, there's no way for
+-- strConfig to revert to the default behavior. And there's no instance for
+-- `Show FieldFormat`.
 instance Configurable Floating where
-  type ConfigFor Floating = Last Printf.FieldFormat
-  parseConfigFor = go
+  type ConfigFor Floating = Last (Maybe Printf.FieldFormat)
+  parseConfigFor str = pure . Just <$> go str
    where
+    go :: String -> Either String Printf.FieldFormat
     go = \case
       [] -> Left "incomplete format string"
       ('-' : s) ->
-        go s <&&> \f -> f { Printf.fmtAdjust = Just Printf.LeftAdjust }
-      ('+' : s) -> go s <&&> \f -> f { Printf.fmtSign = Just Printf.SignPlus }
-      (' ' : s) -> go s <&&> \f -> f { Printf.fmtSign = Just Printf.SignSpace }
-      ('0' : s) -> go s <&&> \f -> f { Printf.fmtAdjust = Just Printf.ZeroPad }
-      ('#' : s) -> go s <&&> \f -> f { Printf.fmtAlternate = True }
+        go s <&> \f -> f { Printf.fmtAdjust = Just Printf.LeftAdjust }
+      ('+' : s) -> go s <&> \f -> f { Printf.fmtSign = Just Printf.SignPlus }
+      (' ' : s) -> go s <&> \f -> f { Printf.fmtSign = Just Printf.SignSpace }
+      ('0' : s) -> go s <&> \f -> f { Printf.fmtAdjust = Just Printf.ZeroPad }
+      ('#' : s) -> go s <&> \f -> f { Printf.fmtAlternate = True }
       s         -> do
         let isDigit         = (`elem` ("0123456789" :: String))
             isFmtChar       = (`elem` ("fFgGeE" :: String))
@@ -334,7 +339,7 @@ instance Configurable Floating where
                               (Right . Just)
                               (readMaybe precS)
         case rest2 of
-          (c : []) | isFmtChar c -> Right $ pure $ Printf.FieldFormat
+          (c : []) | isFmtChar c -> Right $ Printf.FieldFormat
             { Printf.fmtWidth     = widthI
             , Printf.fmtPrecision = precI
             , Printf.fmtAdjust    = Nothing
@@ -344,8 +349,6 @@ instance Configurable Floating where
             , Printf.fmtChar      = c
             }
           _ -> Left "cannot parse format specifier"
-
-    a <&&> f = fmap (fmap f) a
 
 data ConfStrQuotes
   = ConfStrQuotesAlways

@@ -128,7 +128,7 @@ main = Hspec.hspec $ do
     numberedTest $ do
       -- The outer and inner lists only show 1 element each, the middle one
       -- shows all.
-      let config1 = Gist.config @[] (pure 1, pure config2)
+      let config1 = Gist.config @[] (pure (Just 1), pure config2)
           config2 = Gist.config @[] (mempty, pure config1)
       layout 1 (gist [config1] [[[(), ()], [(), ()]], [[(), ()], [(), ()]]])
         `shouldBe` Text.intercalate
@@ -343,7 +343,7 @@ main = Hspec.hspec $ do
                      "\n"
                      [ "{ Maybe: <<((Last Bool),(Last Config))>>"
                      , ", (): <<()>>"
-                     , ", []: <<((Last Int),(Last Config))>> }"
+                     , ", []: <<((Last (Maybe Int)),(Last Config))>> }"
                      ]
 
 -- | It's a hassle to come up with descriptive test names, but convenient for
