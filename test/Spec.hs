@@ -329,7 +329,7 @@ main = Hspec.hspec $ do
         layout 80 (gist conf $ Just $ Nothing @()) `shouldBe` "Just _"
 
     numberedTest $ do
-      -- This could probably look better, the Dynamics in particular.
+      -- This could probably look better, the Dynamics and Proxy in particular.
       layout
           80
           (gist
@@ -342,7 +342,7 @@ main = Hspec.hspec $ do
         `shouldBe` Text.intercalate
                      "\n"
                      [ "{ Maybe: <<((Last Bool),(Last Config))>>"
-                     , ", (): <<()>>"
+                     , ", (): <<Proxy (* -> *) Last>>"
                      , ", []: <<((Last (Maybe Int)),(Last Config))>> }"
                      ]
 
