@@ -249,10 +249,11 @@ instance Configurable a => Configurable [a] where
 instance Configurable [] where
   type ConfigFor [] = (Last (Maybe Int), Last Config)
   parseConfigFor s = case words s of
+    ["show-first", "-"] -> Right (pure Nothing, mempty)
     ["show-first", n] -> case readMaybe n of
       Just n' -> Right (pure (Just n'), mempty)
-      Nothing -> Left "Expected \"show-first (int)\""
-    _ -> Left "Expected \"show-first (int)\""
+      Nothing -> Left "Expected \"show-first (int | '-')\""
+    _ -> Left "Expected \"show-first (int | '-')\""
 
 instance Gist a => Gist (Maybe a) where
   gistPrec' prec conf val = if fromLast False showConstructors
@@ -309,7 +310,10 @@ instance Configurable Double where
 -- `Show FieldFormat`.
 instance Configurable Floating where
   type ConfigFor Floating = Last (Maybe Printf.FieldFormat)
-  parseConfigFor str = pure . Just <$> go str
+  parseConfigFor str = pure <$> case str of
+    "-"     -> Right Nothing
+    '%' : s -> Just <$> go s
+    _       -> Left "Expected '-' or '%'"
    where
     go :: String -> Either String Printf.FieldFormat
     go = \case

@@ -29,12 +29,13 @@ main = Hspec.hspec $ do
   describe "gisting floaty things" $ do
     let tests :: Floating a => [([String], a, Text)]
         tests =
-          [ ([]       , 123.4, "123.4")
-          , ([".0f"]  , 123.4, "123")
-          , ([".3f"]  , 123.4, "123.400")
-          , (["7.3f"] , 123.4, "123.400")
-          , (["8.3f"] , 123.4, " 123.400")
-          , (["08.3f"], 123.4, "0123.400")
+          [ ([]             , 123.4, "123.4")
+          , (["%.0f"]       , 123.4, "123")
+          , (["%.3f"]       , 123.4, "123.400")
+          , (["%7.3f"]      , 123.4, "123.400")
+          , (["%8.3f"]      , 123.4, " 123.400")
+          , (["%08.3f"]     , 123.4, "0123.400")
+          , (["%08.3f", "-"], 123.4, "123.4")
           ]
 
     describe "Double" $ do
@@ -171,7 +172,7 @@ main = Hspec.hspec $ do
         layout
             80
             (gist
-              [Gist.strConfig @[] "show-first 3", Gist.strConfig @Double ".2f"]
+              [Gist.strConfig @[] "show-first 3", Gist.strConfig @Double "%.2f"]
               arr
             )
           `shouldBe` "[1.10, 1.11, 1.11, ...]"
@@ -180,7 +181,7 @@ main = Hspec.hspec $ do
         layout
             10
             (gist
-              [Gist.strConfig @[] "show-first 3", Gist.strConfig @Double ".2f"]
+              [Gist.strConfig @[] "show-first 3", Gist.strConfig @Double "%.2f"]
               arr
             )
           `shouldBe` Text.intercalate
@@ -191,8 +192,8 @@ main = Hspec.hspec $ do
         layout
             80
             (gist
-              [ Gist.strConfig @Double ".2f"
-              , Gist.config @[] (mempty, pure $ Gist.strConfig @Double ".3f")
+              [ Gist.strConfig @Double "%.2f"
+              , Gist.config @[] (mempty, pure $ Gist.strConfig @Double "%.3f")
               ]
               arr
             )
@@ -202,12 +203,26 @@ main = Hspec.hspec $ do
         layout
             80
             (gist
-              [ Gist.strConfig @Double ".2f"
-              , Gist.config @[] (mempty, pure $ Gist.strConfig @Double ".3f")
+              [ Gist.strConfig @Double "%.2f"
+              , Gist.config @[] (mempty, pure $ Gist.strConfig @Double "%.3f")
               ]
               (1.1 :: Double, arr)
             )
           `shouldBe` "(1.10, [1.100, 1.110, 1.111, 1.111])"
+
+      numberedTest $ do
+        layout
+            80
+            (gist
+              -- `[Double]` is more specific than `[]`, so it overrides even
+              -- though it's first in the list.
+              [ Gist.strConfig @Double "%.2f"
+              , Gist.strConfig @[Double] "show-first -"
+              , Gist.strConfig @[] "show-first 1"
+              ]
+              ([(), (), ()], arr)
+            )
+          `shouldBe` "([(), ...], [1.10, 1.11, 1.11, 1.11])"
 
     do
       let map_ = Map.fromList [(3.2 :: Double, ["foo" :: String, "foo bar"])]
@@ -258,9 +273,10 @@ main = Hspec.hspec $ do
         `shouldBe` "{foo bar: \"baz\"}"
 
     do
-      let
-        config =
-          [Gist.strConfig @Double ".2f", Gist.strConfig @String "quotes-always"]
+      let config =
+            [ Gist.strConfig @Double "%.2f"
+            , Gist.strConfig @String "quotes-always"
+            ]
 
       numberedTest $ do
         layout 80 (gist config $ Left @Double @String 3.2)
@@ -272,7 +288,7 @@ main = Hspec.hspec $ do
 
     do
       let config =
-            [ Gist.strConfig @Double ".2f"
+            [ Gist.strConfig @Double "%.2f"
             , Gist.config @Either (mempty, pure mempty)
             ]
 
