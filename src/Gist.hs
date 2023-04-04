@@ -3,9 +3,12 @@ module Gist
   , Configurable(..)
   , Config(..)
   , Prettily(..)
+  , Showily(..)
   , config
   , strConfig
   , gist
+  , gistPrec
+  , parensIfPrecGT
   , ConfMap(..)
   , ConfStrQuotes(..)
   ) where
@@ -18,6 +21,8 @@ import           Data.Kind                      ( Type )
 import qualified Data.Map.Strict               as Map
 import           Data.Map.Strict                ( Map )
 import           Data.Monoid                    ( Last(..) )
+import qualified Data.Set                      as Set
+import           Data.Set                       ( Set )
 import           Data.String                    ( IsString )
 import qualified Data.Text                     as Text
 import           Data.Text                      ( Text )
@@ -94,6 +99,7 @@ class
     -> Either String (ConfigForList a)
   parseConfigForList = parseConfigFor @[]
 
+-- brittany doesn't handle GADT syntax for this.
 data SomeConfigurable = forall a . Configurable a => SomeConfigurable
                                                        !(TypeRep a)
 
@@ -228,6 +234,13 @@ instance Typeable a => Configurable (Showily a)
 gist :: Gist a => [Config] -> a -> Doc ann
 gist confs = gist' (mconcat confs)
 
+-- | Concatenates several configs into one before applying.
+--
+-- This lets us do `gistPrec prec [strConfig ..., config ...]`. But maybe we
+-- want an `IsConfig` typeclass.
+gistPrec :: Gist a => Int -> [Config] -> a -> Doc ann
+gistPrec prec confs = gistPrec' prec (mconcat confs)
+
 -- | Parse a `Config` from a string.
 strConfig :: forall a . (HasCallStack, Configurable a) => String -> Config
 strConfig s = case parseConfigFor @a s of
@@ -250,7 +263,7 @@ instance Configurable [] where
   type ConfigFor [] = (Last (Maybe Int), Last Config)
   parseConfigFor s = case words s of
     ["show-first", "-"] -> Right (pure Nothing, mempty)
-    ["show-first", n] -> case readMaybe n of
+    ["show-first", n  ] -> case readMaybe n of
       Just n' -> Right (pure (Just n'), mempty)
       Nothing -> Left "Expected \"show-first (int | '-')\""
     _ -> Left "Expected \"show-first (int | '-')\""
@@ -484,6 +497,23 @@ instance (Gist a, Gist b) => Gist (Either a b) where
     Right a -> "Right" <+> gistPrec' 11 (fromLast conf confR) a
    where
     (confL, confR) = configLookups @(Either :&& Either a :& Either a b) conf
+
+instance Gist a => Gist (Set a) where
+  gistPrec' _ conf s =
+    group
+      $ encloseSep (flatAlt "{ " "{") (flatAlt " }" "}") ", "
+      $ (showElt <$> Set.toList s)
+   where
+     subConf = configLookups @(Set :&& Set a) conf
+     showElt = gist' (fromLast conf subConf)
+
+instance Typeable a => Configurable (Set a) where
+  type ConfigFor (Set a) = ConfigFor Set
+  parseConfigFor = parseConfigFor @Set
+
+instance Configurable Set where
+  type ConfigFor Set = Last Config
+  parseConfigFor _ = Left "Cannot parse config for Set"
 
 instance (Typeable a, Typeable b) => Configurable (Either a b) where
   type ConfigFor (Either a b) = ConfigFor Either

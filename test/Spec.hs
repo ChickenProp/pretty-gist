@@ -4,6 +4,7 @@ import           Data.Foldable                  ( for_ )
 import qualified Data.IORef                    as IORef
 import qualified Data.Map.Strict               as Map
 import           Data.Map.Strict                ( Map )
+import qualified Data.Set                      as Set
 import           Data.String                    ( IsString )
 import qualified Data.Text                     as Text
 import           Data.Text                      ( Text )
@@ -343,6 +344,25 @@ main = Hspec.hspec $ do
         layout 80 (gist conf $ Nothing @(Maybe ())) `shouldBe` "Nothing"
       numberedTest $ do
         layout 80 (gist conf $ Just $ Nothing @()) `shouldBe` "Just _"
+
+    numberedTest $ do
+      layout 80 (gist [] $ Set.singleton ()) `shouldBe` "{()}"
+
+    numberedTest $ do
+      layout 80 (gist [] $ Set.fromList @Double [1.2, 3.3, 4.5])
+        `shouldBe` "{1.2, 3.3, 4.5}"
+
+    numberedTest $ do
+      layout 0 (gist [] $ Set.fromList @Double [1.2, 3.3, 4.5])
+        `shouldBe` "{ 1.2\n, 3.3\n, 4.5 }"
+
+    numberedTest $ do
+      layout
+          80
+          ( gist [Gist.strConfig @Floating "%.2f"]
+          $ Set.fromList @Double [1.2, 3.3, 4.5]
+          )
+        `shouldBe` "{1.20, 3.30, 4.50}"
 
     numberedTest $ do
       -- This could probably look better, the Dynamics in particular.
