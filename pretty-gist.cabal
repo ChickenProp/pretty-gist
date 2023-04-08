@@ -24,6 +24,7 @@ common common
   ghc-options: -Wall -Wmissing-deriving-strategies -Wredundant-constraints
   default-extensions:
     AllowAmbiguousTypes
+    ConstrainedClassMethods
     DataKinds
     DefaultSignatures
     DeriveFunctor
@@ -35,6 +36,7 @@ common common
     LambdaCase
     OverloadedStrings
     PolyKinds
+    RankNTypes
     ScopedTypeVariables
     StandaloneDeriving
     TupleSections
@@ -47,6 +49,7 @@ library
   import: common
   exposed-modules:
       Gist
+      Gist.Simple
   other-modules:
       Paths_pretty_gist
   hs-source-dirs:
