@@ -1,12 +1,14 @@
+(This README is incomplete.)
+
 This is an exploration of a new-to-me approach to stringification.
 
 The lowest-friction way to stringify things in Haskell is usually `show`. It
 gives the user zero ability to control how the thing is rendered.
 
 The
-`[Show1](https://hackage.haskell.org/package/base-4.18.0.0/docs/Data-Functor-Classes.html#t:Show1)`
+[`Show1`](https://hackage.haskell.org/package/base-4.18.0.0/docs/Data-Functor-Classes.html#t:Show1)
 and
-`[Show2](https://hackage.haskell.org/package/base-4.18.0.0/docs/Data-Functor-Classes.html#t:Show2)`
+[`Show2`](https://hackage.haskell.org/package/base-4.18.0.0/docs/Data-Functor-Classes.html#t:Show2)
 classes give some control, but only in limited ways. Importantly, they only work
 on paramaterized values; you could use `Show2` to change how you render the keys
 of a `Map Int String`, but not of an `IntMap String`.
@@ -20,12 +22,16 @@ easily get:
 
 * A complicated data structure contains JSON values, and I want them rendered as
   JSON rather than as a Haskell data type. Or it contains floating-point
-  numbers, and I want them rounded to 3dp.
+  numbers, and I want them rounded to 3dp. Or strings, which I want printed
+  using C-style escapes rather than Haskell-style, and with unicode rendered.
 
 * A nested data structure might be cyclic. I want to only show three levels
   deep.
 
-`pretty-gist` aims to enable stuff like this.
+`pretty-gist` aims to enable stuff like this. I call the rendered outputs it
+produces "gists" following Raku's use of that term, where I think the intention
+is something like "take a guess about what I'm likely to want to see here and
+show me that". But if `pretty-gist` guesses wrong, it lets you correct it.
 
 ## Design goals
 
@@ -36,15 +42,200 @@ easily get:
 
 * It should pretty-print, with indentation that adjusts to the available width.
 
-* It should be low boilerplate, both as a user and an implementor.
+* It should be low boilerplate, both as a user and an implementer.
 
 * You shouldn't need extra imports to configure the rendering for a type.
 
-* If something is *almost* supported, you should be able to make it work.
+* If something *almost* works, you should be able to make it work. No need to
+  throw everything out and start from scratch.
 
-Not all of these goals have been met. Maybe more will be in future.
+I don't know how to meet all these design goals at once, but they're things I
+aim for.
 
-## Solution
+## Simple solution
+
+Perhaps the very simplest solution is just to write a custom renderer every time
+I need one.
+
+A level up from that is to write a renderer for every data type. This is what
+you'd do in Elm (which for current purposes you can think of as "Haskell with
+fewer features, but nicer records in some ways"):
+
+```elm
+gistList
+  :  { showElems : Maybe Int, gistElem : a -> String }
+  -> List a
+  -> String
+```
+
+Problem: you don't want to write every config option out every time. But you
+can't provide a good default config, because it would have type
+
+```elm
+defaultConfigList : { showElems : Maybe Int, gistElem : a -> String }
+```
+
+and so `gistElem` in this would have to be a constant function. I suppose you
+could have `defaultConfigListString`, `defaultConfigListFloat` and so on, but
+that scales awfully.
+
+Haskell lets us improve on this with typeclasses. We can use type families to
+let each gistable type have a separate config type.
+
+```haskell
+class Gist a where
+  type Config a :: Type
+  defaultConfig :: Config a
+  gist :: Config a -> a -> String
+
+data ConfigList a = ConfigList
+  { showFirst :: Maybe Int
+  , configElem :: Config a
+  }
+
+instance Gist a => Gist [a] where
+  type Config [a] = ConfigList a
+  defaultConfig =
+    ConfigList { showFirst = Nothing, configElem = defaultConfig }
+  gist = ...
+```
+
+This is the foundation of what I call the "simple" approach, which is
+implemented in the module `Gist.Simple`.
+
+We need to complicate it for various reasons. Since we want pretty-printing,
+`String` is a bad output type; for now I'm using
+[`Doc`](https://hackage.haskell.org/package/prettyprinter-1.7.1/docs/Prettyprinter.html#t:Doc)
+from `prettyprinter` but I could believe that better options exist.
+
+Also, this won't handle strings well. Other typeclasses (including `Show`) solve
+this by having an extra method for "how to handle lists of this type"; then you
+give that method a default implementation, but override it for `Char`. This
+seems fine as a solution, by which I mean "I hate it but I don't have any better
+ideas", and it's what I've implemented in the "dynamic" approach below. But I
+haven't actually bothered to implement it here yet.
+
+The `Show` class also has some stuff to handle operator precedence. Instances
+choose whether or not to surround themselves in parentheses depending on the
+precedence level of the context, which the caller tells them. That's not
+strictly necessary here, precedence-aware classes could put that in their config
+types. But then the caller can't provide that info (because the callee might not
+have it), so the user has to. That would suck.
+
+So instead of the `gist` method I wrote above, we actually have
+
+```haskell
+gistPrec :: Int -> Config a -> a -> Doc ann
+```
+
+(We do keep `gist`, defaulting it to `gistPrec 0`; instances which don't care
+about precedence can implement either method.)
+
+Essentially, we've decided that one particular config parameter is important
+enough that every instance takes it (and in particular, every instance *knows*
+that every instance takes it). That feels kinda dirty. Is there anything else
+that ought to be given this treatment?
+
+There's one more complication. Some things can't be rendered automatically (e.g.
+functions), but we sometimes want to render them, or data structures containing
+them, anyway. Like a function `Bool -> Int` that's equivalent to a pair `(Int,
+Int)`. Sometimes we can use newtypes and maybe `coerce` for this, but not
+always, and it might be a pain even if we can.
+
+It turns out we can handle this case. Consider the type
+
+```haskell
+data Gister a where
+  FnGister :: (forall ann . Int -> a -> Doc ann) -> Gister a
+  ConfGister :: Gist a => Config a -> Gister a
+
+runGister :: Int -> Gister a -> a -> Doc ann
+runGister prec = \case
+  FnGister   f -> f prec
+  ConfGister c -> gistPrec prec c
+```
+
+A `Gister` is a renderer for any type. For types implementing `Gist`, we can
+create a `Gister` through `Config`, but for any other type we can still write
+our own rendering function.
+
+This lets us have an instance `Gist [a]` without first requiring `Gist a`. We
+can't have a (useful) default config in that case, the only fully general
+`Gister a`s we could write would ignore the value they're passed. But we can
+resolve that:
+
+```haskell
+class Gist a where
+  type Config a :: Type
+  type HasDefaultConfig a :: Constraint
+  defaultConfig :: HasDefaultConfig a => Config a
+  gistPrec :: Int -> Config a -> a -> Doc ann
+
+data ConfigList a = ConfigList
+  { showFirst :: Maybe Int
+  , gistElem  :: Gister a
+  }
+
+instance Gist [a] where
+  type Config [a] = ConfigList a
+  type HasDefaultConfig [a] = (Gist a, HasDefaultConfig a)
+  defaultConfig =
+    ConfigList { showFirst = Nothing, gistElem = defaultConfig }
+  gistPrec = ...
+```
+
+So now you can call `gist` on a `[Bool -> Int]`, and you need to write for
+yourself how to render one of those functions but you can use `gist` when you do
+so. There's no `defaultConfig @[Bool -> Int]`, but you can do a type-changing
+update of `defaultConfig @[Void]` or whatever.
+
+And that's just about everything.
+
+So why wasn't I happy with this solution? Why did I go looking for others? There
+are two or three specific problems I was trying to solve.
+
+There's a problem for implementers. As an implementer, you're responsible for
+capturing and passing on configuration for, roughly speaking, every field of
+every constructor of your type. If e.g. the `IntMap` instance forgets that
+people might want to configure how it renders the keys, then the keys won't be
+configurable.
+
+I think the other approaches I have kinda mitigate this problem,
+but I wouldn't say "solve". The `Gister` thing also mitigates it, since users
+can essentially write their own instances, but I didn't come up with it until
+after I'd gone exploring.
+
+There's also a problem for users. As a user, I expect that you'll usually want
+to configure every value of a type in the same way, at any given call to `gist`.
+If you have a `[(Float, Float)]`, you probably want to render the `fst`s the
+same as the `snd`s.
+
+But to do that, you just have to find every place in your
+data structure that has or might have a Float, and configure them all. I think
+the other approaches I have mostly solve this problem, but with other costs.
+
+And, honestly, I wasn't enthusiastic about doing lots of record updates. There's
+a bunch of [things I don't
+know](https://www.reddit.com/r/haskell/comments/128aifn/monthly_hask_anything_april_2023/jepke16/)
+offhand about how to work with records, and I think some changes planned in
+upcoming GHC releases, but my impression was it would be kind of a pain. The
+other approaches let users do configuration through strings as well as record
+updates, but strings also kinda suck for this.
+
+Anyway, let's look at what else I came up with.
+
+## Dynamic solution
+
+(TBC. Everything below is basically editing notes that I may incorporate
+properly later. Not really intended for public consumption but no reason not to
+publish them I guess.)
+
+---
+
+
+
+
+
 
 The approach I'm taking is to have a store of configuration options. Users can
 write to it to specify how they want things to be rendered, and implementations
@@ -195,3 +386,225 @@ implemented through string parsing. But I guess we'll see how things land.
 The first argument to `gist` is a list of all configurations you want to apply
 to any type, and they get applied wherever the type appears in the value being
 rendered.
+
+## Records
+
+In general it would be nice to use records to configure things. But Haskell's
+record story is not great.
+
+For lots of data structures we might want the option to only show the beginning.
+In current implementations I've called it "show first", but "truncate at" might
+be another sensible choice. We could imagine applying this to list, maps, sets,
+strings, etc.. And then we could also have a "count remaining" option so the
+user can see how many elements were omitted.
+
+So do the records we use to configure this type, all have fields `truncateAt ::
+Maybe Int, countRemaining :: Bool`? Certainly we'd like users to be able to
+guess what these options are called, supposing an instance has them.
+
+I don't think duplicate record fields work very well right now. (It's possible
+they've improved recently.) But I'm also not enthusiastic about prefixing every
+field in every config type.
+
+A second problem with records is importing.
+
+It may be that these problems are solved by anonymous records. But that seems
+like a very large hammer, and increases dependency footprints.
+
+Using generic-lens and/or generic-optics might also be fine as a solution. Users who don't want to rely on those could still do the awkward workarounds.
+
+## Comparison
+
+### Simplicity
+
+Unsurprisingly, the Simple interface is easiest to understand, which seems
+valuable. It works by construction, with invalid types being unrepresentable.
+The other interfaces are less transparent, and use types that could hold invalid
+values if I wrote a bug. Additionally, the monadic interface relies on
+higher-kinded data.
+
+### Ease of use
+
+To a large extent this is an open question, and I don't think there's going to
+be an easy answer to it.
+
+### Ease of implementation
+
+That is, how easy is it to write an instance?
+
+### Overridability
+
+That is, if an instance doesn't exist, or doesn't do quite what you want, can
+you as a user do something about it?
+
+The Simple interface wins here: if you don't like the `Gist` instance for a
+type, you can simply write your own renderer and use that.
+
+```haskell
+gist (defaultConfig & #gistElem .~ FnGister (\() -> "_")) [()] -- "[_]"
+```
+
+This even works if the type doesn't have its own instance. A caveat is there's
+then no `defaultConfig`, but you can just use a different `defaultConfig` and
+change the type afterwards:
+
+```haskell
+gist (defaultConfig @[Void]
+      & #gistElem
+      .~ FnGister (\f -> gist defaultConfig $ f ()))
+     [\() -> 3] -- "[3]"
+```
+
+(TODO: do these work? The first one might also need its type specified.)
+
+I think I'd be able to make the "write your own renderer" thing work for the
+other interfaces. At any rate, any individual instance can have as an option
+"use some custom renderer instead of the one specified here". So I could hard
+code that as a config option to every instance, and if I play my cards right it
+might not even inconvenience implementers.
+
+But you'd only be able to override existing instances like that. You wouldn't be
+able to ignore the lack of an instance, and I don't see a way to make that
+possible. In the simple interface, it's possible to create a value of type
+`Config [() -> Int]` even though there's no `instance Gist (() -> Int)`; and
+that value is enough to gist a value of type `[() -> Int]`.
+
+But in the other interfaces, to gist a value of type `[a]`, the configuration
+type is simply `Config`. We may know that the `Config` includes instructions for
+rendering `a` that have nothing to do with the `Gist a` instance; but the
+compiler doesn't know that. Maybe it's possible if you somehow attach a
+type-level list to the `Config` saying which instances are unnecessary, but that
+sounds unergonomic.
+
+## Open questions
+
+### How well do records work for this?
+
+It seems natural to use records for config types, but Haskell's records are
+kinda crufty. (And so is Haskell's import syntax, and so is the interaction
+between the two.)
+
+I'd prefer to be able to do updates without either explicitly importing a record
+field or qualifying it. That is, I don't like either of
+
+```haskell
+import Some.Data.Type (GistConfig(..))
+result = gist (defaultConfig { someOption = 3 }) val
+
+import qualified Some.Data.Type as Type
+result = gist (defaultConfig { Type.someOption = 3 }) val
+```
+
+Both have the problem that you need to know where the `Gist` instance for a type
+is defined. If it's defined next to the type itself, you'll typically find its
+configuration type in the same module. (But maybe not, if it borrows another
+type's config and doesn't re-export it.) If it's defined next to the `Gist`
+class, you'll find its configuration type in the `Gist` module.
+
+It's probably not that big a deal. Still, I'd prefer users not to have to worry
+about this. [Anonymous
+records](https://hackage.haskell.org/package/large-anon-0.2/docs/Data-Record-Anon-Simple.html)
+might be one solution, downside is that package has a lot of dependencies but
+upside is they might be useful for other reasons, see next section. I haven't
+investigated them closely. [Generic lenses]() (or [generic optics]()) might be
+another, which would only affect
+
+Possible awkward: consider something like
+
+```haskell
+data Pair a = Pair { p1 :: a, p2 :: a }
+data ConfigPair a = ConfigPair { gistP1 :: Gister a, gistP2 :: Gister a }
+instance Gist (Pair a) where { type Config (Pair a) = ConfigPair a; ... }
+
+val :: Pair (() -> Int)
+```
+
+Suppose we want to gist `val`. As a record upate, and using lenses, the configs
+look like:
+
+```haskell
+defaultConfig @(Pair Void) { gistP1 = FnGister (...), gistP2 = FnGister (...) }
+
+defaultConfig @(Pair Void)
+  & #gistP1 .~ FnGister (...)
+  & #gistP2 .~ FnGister (...)
+```
+
+But the second doesn't type check, because after the first update `gistP1` and
+`gistP2` have different types. From a quick glance at the docs I'm not even sure
+large-anon supports type-changing record updates; if it does it may or may not
+have the same problem.
+
+Possible solution: we actually have
+
+```haskell
+data ConfigPair a b = ConfigPair { gistP1 :: Gister a, gistP2 :: Gister b }
+instance Gist (Pair a) where { type Config (Pair a) = ConfigPair a a; ... }
+```
+
+Some of these problems partially go away if we allow using strings for config.
+But not all the way, and my guess is the cure is worse than the disease.
+
+### Can we make `DerivingVia` or `DeriveAnyClass` work?
+
+A sensible default for a product type is likely "render similar to how the
+`Show` instance would, but have a config option for each of your fields". Can we
+make that work through a `Generic` instance?
+
+This probably needs anonymous records. I can't think how else to do it.
+
+Better yet would be if we can have a custom instance write a record, and say
+"include in this record the config options that would have been generated
+generically". (Ideally as a subrecord, not a record-valued field.)
+
+If we can't make these work, I suppose template Haskell is an option. I'm not
+sure how annoying it would be. Also, it could conceivably be possible to derive
+the implementation for the `gistPrec` function generically, if the user defines
+the `Config` type in a specific way.
+
+### Does the PVP cause us problems?
+
+
+
+
+
+
+
+
+
+The Simple interface is easiest to understand, which seems valuable. It supports
+containers of non-gistable things. (You can gist e.g. `[(+ 1), (* 2)]`, though
+there's no default config for that.) It also gives you full control over
+rendering of gistable things, if the existing instance doesn't do what you want.
+
+One downside is verbosity in use. There's no way to say "yes, every Float should
+be rendered like...", you just need to point at every Float in your data
+structure. How big a deal is this? Depends on common use cases. If it turns out
+to be a problem, it may be possible to take ideas from one of the other
+implementations, and use them to generate a config for this implementation.
+
+Another is that it's easier to write a badly-behaved instance. If you simply
+don't include subconfigs for some part of your data, users won't be able to
+configure it. How big a deal is this? Partly depends what quality of generic
+implementation I can reach.
+
+There's no configuration by string. I want users to be able to make changes
+without fiddling with imports. I think that something like
+
+```haskell
+import Gist (gist)
+result = gist (defaultConfig { showFirst = Just 2 }) [...]
+```
+
+doesn't work, and perhaps can't be made to, because of scoping; though it may be
+that `HasField` related stuff will change that in future? Even if we don't mind
+the imports, duplicate record fields might make things very awkward. Meanwhile,
+I'm confident that
+
+```haskell
+import Gist (gist)
+result = gist (defaultConfig & #showFirst .~ Just 2) [...]
+```
+
+can be made to work, but maybe only if the user relies on generic-lens or
+generic-optics.
