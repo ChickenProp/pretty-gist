@@ -1,4 +1,4 @@
-module Gist
+module Gist.Dynamic
   ( Gist(..)
   , Configurable(..)
   , Config(..)

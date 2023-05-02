@@ -48,7 +48,7 @@ common common
 library
   import: common
   exposed-modules:
-      Gist
+      Gist.Dynamic
       Gist.Monadic
       Gist.Simple
   other-modules:
@@ -67,6 +67,7 @@ test-suite pretty-gist-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      Dynamic
       Paths_pretty_gist
   hs-source-dirs:
       test
