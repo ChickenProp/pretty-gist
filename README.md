@@ -100,8 +100,9 @@ instance Gist a => Gist [a] where
   gist = ...
 ```
 
-This is the foundation of what I call the "simple" approach, which is
-implemented in the module `Gist.Simple`.
+This is the foundation of what I call the "simple" approach, naming it in
+comparison to things I haven't shown you yet, which is implemented in the module
+`Gist.Simple`.
 
 We need to complicate it for various reasons. Since we want pretty-printing,
 `String` is a bad output type; for now I'm using
@@ -120,7 +121,7 @@ choose whether or not to surround themselves in parentheses depending on the
 precedence level of the context, which the caller tells them. That's not
 strictly necessary here, precedence-aware classes could put that in their config
 types. But then the caller can't provide that info (because the callee might not
-have it), so the user has to. That would suck.
+accept it), so the user has to. That would suck.
 
 So instead of the `gist` method I wrote above, we actually have
 
@@ -136,11 +137,36 @@ enough that every instance takes it (and in particular, every instance *knows*
 that every instance takes it). That feels kinda dirty. Is there anything else
 that ought to be given this treatment?
 
-There's one more complication. Some things can't be rendered automatically (e.g.
-functions), but we sometimes want to render them, or data structures containing
-them, anyway. Like a function `Bool -> Int` that's equivalent to a pair `(Int,
-Int)`. Sometimes we can use newtypes and maybe `coerce` for this, but not
-always, and it might be a pain even if we can.
+Next: the typechecking here doesn't work very well. If we try
+
+```haskell
+gist (defaultConfig { ... }) [True]
+```
+
+we probably mean `defaultConfig` to refer to `defaultConfig @[Bool]`. But all
+GHC knows is that we mean `defaultConfig { ... }` to have type `Config [Bool]`.
+That doesn't even fully specify the type of `defaultConfig`, let alone its
+value. So we instead need to write
+
+```haskell
+gist ((defaultConfig @[Bool]) { ... }) [True]
+```
+
+which is no fun. (That extra unnecessary-looking set of parentheses is an added
+kick in the teeth.) So we add functions `gistF` and `gistPrecF`, which replace
+the `Config a` argument with a `Config a -> Config a` argument and apply it to
+`defaultConfig`. So now we write
+
+```haskell
+gistF (\c -> c { ... }) [True]
+```
+
+But we do keep the existing functions around for the final complication. Some
+things can't be rendered automatically (e.g. functions), but we sometimes want
+to render them anyway, or data structures containing them. Like a function
+`Bool -> Int` that's equivalent to a pair `(Int, Int)`. Sometimes we can use
+newtypes and maybe `coerce` for this, but not always, and it might be a pain
+even if we can.
 
 It turns out we can handle this case. Consider the type
 
@@ -187,7 +213,10 @@ instance Gist [a] where
 So now you can call `gist` on a `[Bool -> Int]`, and you need to write for
 yourself how to render one of those functions but you can use `gist` when you do
 so. There's no `defaultConfig @[Bool -> Int]`, but you can do a type-changing
-update of `defaultConfig @[Void]` or whatever.
+update of `defaultConfig @[Void]` or similar. Though this is harder than we
+might like, because we can't derive a `Generic` instance for `Gister a` which
+means we can't use generic-lens or generic-optics. Fine in this case, annoying
+for nested structures, might be able to improve.
 
 And that's just about everything.
 
@@ -210,9 +239,10 @@ to configure every value of a type in the same way, at any given call to `gist`.
 If you have a `[(Float, Float)]`, you probably want to render the `fst`s the
 same as the `snd`s.
 
-But to do that, you just have to find every place in your
-data structure that has or might have a Float, and configure them all. I think
-the other approaches I have mostly solve this problem, but with other costs.
+But to do that, you just have to find every place in your data structure that
+has or might have a Float, and configure them all. I think the other approaches
+I have mostly solve this problem, but with added complexity when you don't want
+to do that.
 
 And, honestly, I wasn't enthusiastic about doing lots of record updates. There's
 a bunch of [things I don't
@@ -220,7 +250,8 @@ know](https://www.reddit.com/r/haskell/comments/128aifn/monthly_hask_anything_ap
 offhand about how to work with records, and I think some changes planned in
 upcoming GHC releases, but my impression was it would be kind of a pain. The
 other approaches let users do configuration through strings as well as record
-updates, but strings also kinda suck for this.
+updates, but strings also kinda suck for this. But even if you stick to records,
+they let you avoid nested updates, which is nice.
 
 Anyway, let's look at what else I came up with.
 

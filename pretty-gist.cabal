@@ -28,11 +28,13 @@ common common
     DataKinds
     DefaultSignatures
     DeriveFunctor
+    DeriveGeneric
     DerivingStrategies
     DerivingVia
     FlexibleContexts
     FlexibleInstances
     GADTs
+    GeneralizedNewtypeDeriving
     LambdaCase
     OverloadedStrings
     PolyKinds
@@ -68,6 +70,7 @@ test-suite pretty-gist-test
   main-is: Spec.hs
   other-modules:
       Dynamic
+      Simple
       Paths_pretty_gist
   hs-source-dirs:
       test
@@ -79,6 +82,8 @@ test-suite pretty-gist-test
     , hspec
     , hspec-core
     , hspec-expectations
+    , lens
+    , generic-lens
     , pretty-gist
     , prettyprinter
     , text
