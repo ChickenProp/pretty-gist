@@ -31,6 +31,7 @@ common common
     DeriveGeneric
     DerivingStrategies
     DerivingVia
+    DuplicateRecordFields
     FlexibleContexts
     FlexibleInstances
     GADTs
@@ -39,6 +40,7 @@ common common
     OverloadedStrings
     PolyKinds
     RankNTypes
+    RecordWildCards
     ScopedTypeVariables
     StandaloneDeriving
     TupleSections

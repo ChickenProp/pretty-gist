@@ -9,8 +9,9 @@ module Gist.Dynamic
   , gist
   , gistPrec
   , parensIfPrecGT
-  , ConfMap(..)
-  , ConfStrQuotes(..)
+  , ConfigList(..)
+  , ConfigMap(..)
+  , ConfigStrQuotes(..)
   ) where
 
 import           Data.Bifunctor                 ( first )
@@ -48,15 +49,15 @@ class Configurable a => Gist a where
 
   gistList' :: Config -> [a] -> Doc ann
   default gistList'
-    :: (ConfigForList a ~ (Last (Maybe Int), Last Config))
+    :: (ConfigForList a ~ ConfigList)
     => Config
     -> [a]
     -> Doc ann
   gistList' conf l =
-    let (lTake, lSubConf) =
+    let ConfigList {..} =
           configLookups @( [] :&& [a] ) conf
-        subConf = fromLast conf lSubConf
-        elems = case fromLast Nothing lTake of
+        subConf = fromLast conf configElem
+        elems = case fromLast Nothing showFirst of
           Nothing -> map (gist' subConf) l
           Just n  -> case splitAt n l of
             (start, []   ) -> map (gist' subConf) start
@@ -94,7 +95,7 @@ class
   -- If we replace this constrant with `ConfigForList a ~ ConfigFor []`, we get
   -- compile failures for some reason.
   default parseConfigForList
-    :: ConfigForList a ~ (Last (Maybe Int), Last Config)
+    :: ConfigForList a ~ ConfigList
     => String
     -> Either String (ConfigForList a)
   parseConfigForList = parseConfigFor @[]
@@ -254,17 +255,28 @@ config confFor = configInsert @a confFor mempty
 instance Gist a => Gist [a] where
   gistPrec' _ = gistList' @a
 
+data ConfigList = ConfigList
+  { showFirst  :: Last (Maybe Int)
+  , configElem :: Last Config
+  }
+
+instance Semigroup ConfigList where
+  a <> b =
+    ConfigList (showFirst a <> showFirst b) (configElem a <> configElem b)
+
+instance Monoid ConfigList where
+  mempty = ConfigList mempty mempty
+
 instance Configurable a => Configurable [a] where
   type ConfigFor [a] = ConfigForList a
   parseConfigFor = parseConfigForList @a
 
--- | TODO: no way in strConfig to reset to default behavior.
 instance Configurable [] where
-  type ConfigFor [] = (Last (Maybe Int), Last Config)
+  type ConfigFor [] = ConfigList
   parseConfigFor s = case words s of
-    ["show-first", "-"] -> Right (pure Nothing, mempty)
+    ["show-first", "-"] -> Right $ mempty { showFirst = pure Nothing }
     ["show-first", n  ] -> case readMaybe n of
-      Just n' -> Right (pure (Just n'), mempty)
+      Just n' -> Right $ mempty { showFirst = pure (Just n') }
       Nothing -> Left "Expected \"show-first (int | '-')\""
     _ -> Left "Expected \"show-first (int | '-')\""
 
@@ -367,13 +379,13 @@ instance Configurable Floating where
             }
           _ -> Left "cannot parse format specifier"
 
-data ConfStrQuotes
-  = ConfStrQuotesAlways
-  | ConfStrQuotesNever
-  | ConfStrQuotesSometimes
+data ConfigStrQuotes
+  = ConfigStrQuotesAlways
+  | ConfigStrQuotesNever
+  | ConfigStrQuotesSometimes
   deriving stock (Eq, Show)
 
--- | If we use `ConfStrQuotesSometimes`, this decides whether an individual
+-- | If we use `ConfigStrQuotesSometimes`, this decides whether an individual
 -- character should be quoted. A string is quoted if it contains any characters
 -- that should be quoted.
 --
@@ -389,39 +401,39 @@ charWantsQuotes c =
 
 -- | TODO: allow (default to?) C-style escaping or similar.
 instance Configurable IsString where
-  type ConfigFor IsString = Last ConfStrQuotes
+  type ConfigFor IsString = Last ConfigStrQuotes
   parseConfigFor = \case
-    "quotes-always"    -> Right $ pure ConfStrQuotesAlways
-    "quotes-never"     -> Right $ pure ConfStrQuotesNever
-    "quotes-sometimes" -> Right $ pure ConfStrQuotesSometimes
+    "quotes-always"    -> Right $ pure ConfigStrQuotesAlways
+    "quotes-never"     -> Right $ pure ConfigStrQuotesNever
+    "quotes-sometimes" -> Right $ pure ConfigStrQuotesSometimes
     _                  -> Left "unknown quote specifier"
 
 instance Gist Char where
   gistPrec' _ conf c =
     case
-        fromLast ConfStrQuotesSometimes
+        fromLast ConfigStrQuotesSometimes
           $ configLookups @(IsString :&& Char) conf
       of
-        ConfStrQuotesAlways -> viaShow c
-        ConfStrQuotesNever  -> pretty c
-        ConfStrQuotesSometimes ->
+        ConfigStrQuotesAlways -> viaShow c
+        ConfigStrQuotesNever  -> pretty c
+        ConfigStrQuotesSometimes ->
           if charWantsQuotes c then viaShow c else pretty c
 
   gistList' conf s =
     case
-        fromLast ConfStrQuotesSometimes
+        fromLast ConfigStrQuotesSometimes
           $ configLookups @(IsString :&& String) conf
       of
-        ConfStrQuotesAlways -> viaShow s
-        ConfStrQuotesNever  -> pretty s
-        ConfStrQuotesSometimes ->
+        ConfigStrQuotesAlways -> viaShow s
+        ConfigStrQuotesNever  -> pretty s
+        ConfigStrQuotesSometimes ->
           if any charWantsQuotes s then viaShow s else pretty s
 
 instance Configurable Char where
   type ConfigFor Char = ConfigFor IsString
   parseConfigFor = parseConfigFor @IsString
 
-  type ConfigForList Char = Last ConfStrQuotes
+  type ConfigForList Char = Last ConfigStrQuotes
   parseConfigForList = parseConfigFor @Char
 
 instance Gist Text where
@@ -449,16 +461,16 @@ instance Typeable a => Configurable ((,) a) where
   type ConfigFor ((,) a) = (Last Config, Last Config)
   parseConfigFor _ = Left "Cannot parse config for ((,) a)"
 
-data ConfMap = ConfMap
+data ConfigMap = ConfigMap
   { confMapShowKeys :: Last Bool
   , confMapShowVals :: Last Bool
   }
   deriving stock (Eq, Show)
 
-instance Semigroup ConfMap where
-  (ConfMap a1 b1) <> (ConfMap a2 b2) = ConfMap (a1 <> a2) (b1 <> b2)
-instance Monoid ConfMap where
-  mempty = ConfMap mempty mempty
+instance Semigroup ConfigMap where
+  (ConfigMap a1 b1) <> (ConfigMap a2 b2) = ConfigMap (a1 <> a2) (b1 <> b2)
+instance Monoid ConfigMap where
+  mempty = ConfigMap mempty mempty
 
 instance (Gist k, Gist v) => Gist (Map k v) where
   gistPrec' _ conf m =
@@ -466,7 +478,7 @@ instance (Gist k, Gist v) => Gist (Map k v) where
       $ encloseSep (flatAlt "{ " "{") (flatAlt " }" "}") ", "
       $ (showKV <$> Map.toList m)
    where
-    (ConfMap showKeys showVals, confK, confV) =
+    (ConfigMap showKeys showVals, confK, confV) =
       configLookups @(Map :&& Map k :& Map k v) conf
     showKV (k, v) =
       (if fromLast True showKeys then gist' (fromLast conf confK) k else "_")
@@ -485,10 +497,10 @@ instance Typeable k => Configurable (Map k) where
   parseConfigFor = parseConfigFor @Map
 
 instance Configurable Map where
-  type ConfigFor Map = (ConfMap, Last Config, Last Config)
+  type ConfigFor Map = (ConfigMap, Last Config, Last Config)
   parseConfigFor = \case
-    "hide-keys" -> Right (ConfMap (pure False) mempty, mempty, mempty)
-    "hide-vals" -> Right (ConfMap mempty (pure False), mempty, mempty)
+    "hide-keys" -> Right (ConfigMap (pure False) mempty, mempty, mempty)
+    "hide-vals" -> Right (ConfigMap mempty (pure False), mempty, mempty)
     _           -> Left "Expected hide-keys or hide-vals"
 
 instance (Gist a, Gist b) => Gist (Either a b) where
@@ -504,8 +516,8 @@ instance Gist a => Gist (Set a) where
       $ encloseSep (flatAlt "{ " "{") (flatAlt " }" "}") ", "
       $ (showElt <$> Set.toList s)
    where
-     subConf = configLookups @(Set :&& Set a) conf
-     showElt = gist' (fromLast conf subConf)
+    subConf = configLookups @(Set :&& Set a) conf
+    showElt = gist' (fromLast conf subConf)
 
 instance Typeable a => Configurable (Set a) where
   type ConfigFor (Set a) = ConfigFor Set

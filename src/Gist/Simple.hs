@@ -1,5 +1,3 @@
-{-# LANGUAGE DuplicateRecordFields, RecordWildCards #-}
-
 module Gist.Simple
   ( Gist(..)
   , Gister(..)

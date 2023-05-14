@@ -132,8 +132,10 @@ spec = do
     numberedTest $ do
       -- The outer and inner lists only show 1 element each, the middle one
       -- shows all.
-      let config1 = Gist.config @[] (pure (Just 1), pure config2)
-          config2 = Gist.config @[] (mempty, pure config1)
+      let config1 = Gist.config @[] $ mempty { Gist.showFirst  = pure (Just 1)
+                                             , Gist.configElem = pure config2
+                                             }
+          config2 = Gist.config @[] $ mempty { Gist.configElem = pure config1 }
       layout 1 (gist [config1] [[[(), ()], [(), ()]], [[(), ()], [(), ()]]])
         `shouldBe` Text.intercalate
                      "\n"
@@ -146,8 +148,10 @@ spec = do
 
     numberedTest $ do
       -- The outer list shows all elements, the others show just 1.
-      let config = Gist.config @[]
-            (mempty, pure $ config <> Gist.strConfig @[] "show-first 1")
+      let config = Gist.config @[] $ mempty
+            { Gist.configElem = pure $ config <> Gist.strConfig @[]
+                                  "show-first 1"
+            }
       layout 1 (gist [config] [[[(), ()], [(), ()]], [[(), ()], [(), ()]]])
         `shouldBe` Text.intercalate
                      "\n"
@@ -196,7 +200,9 @@ spec = do
             80
             (gist
               [ Gist.strConfig @Double "%.2f"
-              , Gist.config @[] (mempty, pure $ Gist.strConfig @Double "%.3f")
+              , Gist.config @[] $ mempty
+                { Gist.configElem = pure $ Gist.strConfig @Double "%.3f"
+                }
               ]
               arr
             )
@@ -207,7 +213,9 @@ spec = do
             80
             (gist
               [ Gist.strConfig @Double "%.2f"
-              , Gist.config @[] (mempty, pure $ Gist.strConfig @Double "%.3f")
+              , Gist.config @[] $ mempty
+                { Gist.configElem = pure $ Gist.strConfig @Double "%.3f"
+                }
               ]
               (1.1 :: Double, arr)
             )
@@ -377,12 +385,7 @@ spec = do
             <> Gist.config @() mempty
             )
           )
-        `shouldBe` Text.intercalate
-                     "\n"
-                     [ "{ Maybe: <<((Last Bool),(Last Config))>>"
-                     , ", (): <<()>>"
-                     , ", []: <<((Last (Maybe Int)),(Last Config))>> }"
-                     ]
+        `shouldBe` "{Maybe: <<((Last Bool),(Last Config))>>, (): <<()>>, []: <<ConfigList>>}"
 
 -- | It's a hassle to come up with descriptive test names, but convenient for
 -- them all to be unique. This lets us give them numbers. We can't search for

@@ -95,8 +95,7 @@ data ConfigList a = ConfigList
 
 instance Gist a => Gist [a] where
   type Config [a] = ConfigList a
-  defaultConfig =
-    ConfigList { showFirst = Nothing, configElem = defaultConfig }
+  defaultConfig = ConfigList { showFirst = Nothing, configElem = defaultConfig }
   gist = ...
 ```
 
@@ -146,7 +145,10 @@ gist (defaultConfig { ... }) [True]
 we probably mean `defaultConfig` to refer to `defaultConfig @[Bool]`. But all
 GHC knows is that we mean `defaultConfig { ... }` to have type `Config [Bool]`.
 That doesn't even fully specify the type of `defaultConfig`, let alone its
-value. So we instead need to write
+value. (We might be using the `defaultConfig` of some other instance that shares
+the same type; or that has a different type until we update it. The second
+possibility means injective type families don't help much.) So we instead need
+to write
 
 ```haskell
 gist ((defaultConfig @[Bool]) { ... }) [True]
@@ -229,10 +231,11 @@ every constructor of your type. If e.g. the `IntMap` instance forgets that
 people might want to configure how it renders the keys, then the keys won't be
 configurable.
 
-I think the other approaches I have kinda mitigate this problem,
-but I wouldn't say "solve". The `Gister` thing also mitigates it, since users
-can essentially write their own instances, but I didn't come up with it until
-after I'd gone exploring.
+I think the other approaches I have kinda mitigate this problem, but I wouldn't
+say "solve". The `Gister` thing also mitigates it, since users can essentially
+write their own instances, but I didn't come up with it until after I'd gone
+exploring. Also there might be clever things people can do with various forms of
+generic (not necessarily `Generic`) traversal.
 
 There's also a problem for users. As a user, I expect that you'll usually want
 to configure every value of a type in the same way, at any given call to `gist`.
@@ -257,6 +260,190 @@ Anyway, let's look at what else I came up with.
 
 ## Dynamic solution
 
+If we don't want users to have to specify the config for a type at every point
+the type might be used, one thing we might try is to have a store of
+configuration options. Users can write to it to specify how they want things to
+be rendered, and implementations can read from it to decide how to render
+things, and if all goes well they'll render them how the user wanted.
+
+But we still want different config options for different types. So we have a
+type family like in the simple solution, except here I've called it `ConfigFor`
+to free up the name `Config`.
+
+What we want here is essentially a map from types to `ConfigFor`s. Again
+ignoring the problem with `String`, here's one way we can implement that:
+
+```haskell
+class (Typeable a, Monoid (ConfigFor a), Typeable (ConfigFor a))
+   => Configurable a
+ where
+  type ConfigFor a :: Type
+
+data SomeConfigurable where
+  SomeConfigurable :: Configurable a => !(TypeRep a) -> SomeConfigurable
+
+newtype Config =
+  UnsafeConfig { unsafeUnConfig :: Map SomeConfigurable Dynamic }
+
+config :: Configurable a => ConfigFor a -> Config
+configLookup :: Configurable a => Config -> ConfigFor a
+instance Semigroup Config where ...
+instance Monoid Config where ...
+```
+
+Those last four lines declare an interface to `Config` that lets us use it
+safely. We use `mempty` to create an empty `Config`, `config` to create a
+singleton, `(<>)` to combine two `Config`s, and `configLookup` to read from one.
+
+We then define gisting functions in terms of `Config`,
+
+```haskell
+class Configurable a => Gist a where
+  gistPrec' :: Int -> Config -> a -> Doc ann
+
+gistPrec :: Gist a => Int -> [Config] -> a -> Doc ann
+gistPrec prec confs = gistPrec' prec (mconcat confs)
+
+gist :: Gist a => [Config] -> a -> Doc ann
+gist = gistPrec 0
+```
+
+where `gist` and `gistPrec` are slightly more convenient to call than the actual
+class method.
+
+What does an instance for this look like?
+
+```haskell
+data ConfigList a = ConfigList
+  { showFirst :: Last (Maybe Int)
+  , configElem :: Last Config
+  }
+instance Semigroup (ConfigList a) where ...
+instance Monoid (ConfigList a) where ...
+
+instance Configurable [] where
+  type ConfigFor [] = ConfigList
+
+instance Typeable a => Configurable [a] where
+  type ConfigFor [] = ConfigFor [a]
+
+instance Gist a => Gist [a] where
+  gistPrec' _ conf l =
+    let ConfigList { showFirst, configElem } =
+          configLookup @[] conf <> configLookup [a] conf
+        showFirst_ = fromMaybe Nothing $ getLast showFirst
+        configElem_ = fromMaybe conf $ getLast configElem
+    in  ...
+```
+
+We see here the reason that `Configurable` and `Gist` are now distinct classes.
+The user can configure all lists, and they can override that configuration for
+lists of a specific type. Similarly, we can write `instance Configurable
+Floating`, and the `Gist` instances for both `Float` and `Double` read that
+config value, to allow users to configure both those types at once.
+
+We might use this interface like so:
+
+```haskell
+result = gist [config @[] $ mempty { showFirst = pure (Just 5) }] [True]
+```
+
+If you don't want all instances of a particular type to be configured the same,
+that's still possible (assuming the instance was implemented to allow it). You
+have to use stuff like the `configElem` field:
+
+```haskell
+result = gist
+  [ config @Bool $ mempty { ... }
+  , config @[] $ mempty { configElem = pure $ config @Bool $ mempty { ... }
+  ]
+  (True, [False])
+```
+
+I previously mentioned not liking record updates. So we can allow string
+configuration by adding a parsing method to `Configurable`,
+
+```haskell
+class (Typeable a, Monoid (ConfigFor a), Typeable (ConfigFor a))
+   => Configurable a
+ where
+  type ConfigFor a :: Type
+  parseConfigFor :: String -> Either String (ConfigFor a)
+
+strConfig :: forall a . (HasCallStack, Configurable a) => String -> Config
+strConfig s = case parseConfigFor @a s of
+  Left  err     -> error $ "Could not parse config: " <> err
+  Right confFor -> config @a confFor
+
+result = gist [strConfig @[] "show-first 5"] [True]
+```
+
+The nice thing about this is that you don't need to worry about whether the
+record field is imported or where it needs to be imported from. But it's bad in
+so many ways that I'll be surprised if I keep it around.
+
+How does this compare to the simple solution?
+
+I do expect it's simpler in a lot of common use cases. That's valuable. And it's
+probably more likely to keep working, and doing what you want, if you change the
+datatype that you're calling it on.
+
+But there are some complicated cases where it'll be more awkward to get it to do
+what you want. If you do want to configure some instances of a type differently
+from others, you need to fiddle around with things like the `configElem` field
+of `ConfigList`.
+
+As an implementer, it's on you to remember to make such fields available.
+Roughly speaking you *still* need a config field for every field of every
+constructor of your type. And I suspect you're more likely to forget, and
+they're more boilerplate to deal with. On the plus side it's probably going to
+be less of an inconvenience for users if you do forget.
+
+Implementers also need to make a decision for these fields: do the `Config`
+values they contain *replace* the top-level `Config` value or *augment* it? That
+is, suppose I use the configuration
+
+```haskell
+[ config @Foo $ mempty { configA = pure 1 }
+, config @[] $ mempty { configElem = config @Foo $ mempty { configB = pure 1 } }
+]
+```
+
+When rendering a `[Foo]`, we might expect its configuration to be either of
+
+```haskell
+mempty { configB = pure 1 } -- or
+mempty { configA = pure 1, configB = pure 1 }
+```
+
+Which do we choose? That's up to each implementer, and as I write this, I'm not
+sure which I chose myself for the instances I wrote. Maybe I wasn't even
+consistent. I certainly don't expect everyone else to be, which makes a bad
+experience for users.
+
+And suppose that, as a user, you don't understand how your complicated set of
+config options is getting interpreted by instances and turned into the set of
+config values they actually use. What types does an instance call `configLookup`
+for? In what order? You'd better hope instances are well-documented and/or
+(let's face it, and) have source code available.
+
+So there's one more approach I have, with a different set of tradeoffs.
+
+## Monadic solution
+
+The idea behind this is similar to the Dynamic solution. But we
+
+1. Formalize some of the things that pretty much every instance would have done
+   anyway, and make them official parts of the interface.
+
+2. Use a Monad to keep track of some state, and potentially give the user some
+   debugging aid.
+
+Probably some of the changes could be picked and chosen, giving various
+different designs in between the Dynamic and Monadic solutions, but I'm not
+going to evaluate them all individually.
+
+
 (TBC. Everything below is basically editing notes that I may incorporate
 properly later. Not really intended for public consumption but no reason not to
 publish them I guess.)
@@ -268,10 +455,6 @@ publish them I guess.)
 
 
 
-The approach I'm taking is to have a store of configuration options. Users can
-write to it to specify how they want things to be rendered, and implementations
-can read from it to decide how to render things, and if all goes well they'll
-render things how the user wanted.
 
 There are lots of ways users might want to customize rendering. The choices
 someone might make when rendering a list (e.g. how many elements to show,
@@ -442,7 +625,8 @@ A second problem with records is importing.
 It may be that these problems are solved by anonymous records. But that seems
 like a very large hammer, and increases dependency footprints.
 
-Using generic-lens and/or generic-optics might also be fine as a solution. Users who don't want to rely on those could still do the awkward workarounds.
+Using generic-lens and/or generic-optics might also be fine as a solution. Users
+who don't want to rely on those could still do the awkward workarounds.
 
 ## Comparison
 
@@ -596,7 +780,33 @@ the `Config` type in a specific way.
 ### Does the PVP cause us problems?
 
 
+### What is this library trying to be?
 
+Do I expect users to be able to use it to get the renders they want, down to the
+character (and adjusting correctly for width)? That feels too ambitious. But
+then how much control do I want them to have? Should they be able to choose
+between various different layout options and indent widths? Honestly, probably
+*also* too ambitious.
+
+Some places this library might get used:
+
+1. Debugging output that never gets committed
+2. Test output that sticks around but is never seen by users
+3. Debug output that might get seen by users, but only when things go wrong
+4. Ouptut that's fully intended and expected to be seen by users in the normal
+   course of events
+
+If we can do one we can do any of the previous ones, but focusing on an earlier
+number might make it easier to use for that purpose?
+
+### What would be helpful
+
+I don't actually have a lot of case studies in my head. Most of the places I've
+wanted something like this have been at work, and I can't share that code and
+it's too complicated to be a good case study. Haskenthetical is more promising.
+But if readers can think of times they would have found something like this
+useful, I'd love to know about it, especially if there are details that might
+influence the design.
 
 
 
