@@ -427,16 +427,28 @@ config values they actually use. What types does an instance call `configLookup`
 for? In what order? You'd better hope instances are well-documented and/or
 (let's face it, and) have source code available.
 
+Also, newtype deriving doesn't get good results. It's not entirely clear to me
+what good results would look like - we might expect the `Gist` instance for
+`newtype MyFloat = MyFloat Float` to pay attention to config values for
+`MyFloat` as well as for `Float`, or perhaps it should be "instead of". But what
+actually happens is it pays attention to config values for `Float` and not
+`MyFloat`, which is certainly wrong. There isn't even a super convenient way to
+piggyback off the existing instance for `Float` if you define the `MyFloat`
+instance manually.
+
 So there's one more approach I have, with a different set of tradeoffs.
 
 ## Monadic solution
 
-The idea behind this is similar to the Dynamic solution. But we
+The idea behind this is similar to the dynamic solution. But we
 
 1. Formalize some of the things that pretty much every instance would have done
    anyway, and make them official parts of the interface.
 
-2. Use a Monad to keep track of some state, and potentially give the user some
+2. Track the path of types we've walked to get here, and let users match on that
+   when choosing when their config options apply.
+
+3. Use a Monad to keep track of some state, and potentially give the user some
    debugging aid.
 
 Probably some of the changes could be picked and chosen, giving various

@@ -16,6 +16,7 @@ import           Data.Monoid                    ( Last(..) )
 import           Data.Proxy                     ( Proxy(..) )
 import qualified Prettyprinter                 as PP
 import           Prettyprinter                  ( Doc )
+import qualified Text.Printf                   as Printf
 import           Type.Reflection                ( SomeTypeRep(..)
                                                 , TypeRep
                                                 , Typeable
@@ -153,15 +154,30 @@ instance Semigroup Config where
 instance Monoid Config where
   mempty = UnsafeConfig mempty
 
-configSingleton
+config
   :: forall a
    . Configurable a
-  => ConfigFor a Last
-  -> Maybe PathMatcher
+  => Maybe PathMatcher
+  -> ConfigFor a Last
   -> Config
-configSingleton confFor pm = UnsafeConfig $ Map.singleton
+config pm confFor = UnsafeConfig $ Map.singleton
   (SomeConfigurable $ typeRep @a)
   (Map.singleton pm $ Dyn.toDyn confFor)
+
+configF
+  :: forall a
+   . Configurable a
+  => (ConfigFor a Last -> ConfigFor a Last)
+  -> Config
+configF f = config @a Nothing $ f $ mempty @(ConfigFor a Last)
+
+configPF
+  :: forall a
+   . Configurable a
+  => PathMatcher
+  -> (ConfigFor a Last -> ConfigFor a Last)
+  -> Config
+configPF pm f = config @a (Just pm) $ f $ mempty @(ConfigFor a Last)
 
 configLookup
   :: forall a . Configurable a => GistPath -> Config -> ConfigFor a Last
@@ -213,23 +229,23 @@ data CL a
 data (:&) a b -- brittany doesn't like `a :& b`.
 infixl 5 :&
 
-class ConfigList as where
+class Configurables as where
   type ConfigLookupsResult as (f :: Type -> Type) :: Type
   configLookups :: GistPath -> Config -> ConfigLookupsResult as Last
 
   toPathComponents :: NonEmpty SomeTypeRep
 
-instance Configurable a => ConfigList (CL a) where
+instance Configurable a => Configurables (CL a) where
   type ConfigLookupsResult (CL a) f = ConfigFor a f
   configLookups    = configLookup @a
 
   toPathComponents = someTypeRep (Proxy @a) :| []
 
 instance
-  ( ConfigList as
+  ( Configurables as
   , Configurable b
   , ConfigFor b Last ~ ConfigLookupsResult as Last
-  ) => ConfigList (as :& b) where
+  ) => Configurables (as :& b) where
   type ConfigLookupsResult (as :& b) f = ConfigFor b f
   configLookups path conf =
     configLookups @as path conf <> configLookup @b path conf
@@ -238,17 +254,23 @@ instance
   -- is small.
   toPathComponents = toPathComponents @as <> toPathComponents @(CL b)
 
-class (ConfigList (GistPathComponents a), Configurable a) => Gist a where
+class
+  ( Configurable a
+  , Configurables (GistPathComponents a)
+  , ConfigLookupsResult (GistPathComponents a) Last ~ ConfigFor a Last
+  ) => Gist a
+ where
   gistM :: MonadGist m => Int -> a -> m (Doc ann)
   gistM prec val = do
     path <- gistPath
-    conf <- configFor @a path <$> gistConf
+    confLast <- configLookups @(GistPathComponents a) path <$> gistConf
+    let conf = reifyConfig @a confLast
     localPushPath (toPathComponents @(GistPathComponents a))
       $ renderM prec conf val
 
   type GistPathComponents a
   renderM :: MonadGist m => Int -> ConfigFor a Identity -> a -> m (Doc ann)
-  configFor :: GistPath -> Config -> ConfigFor a Identity
+  reifyConfig :: ConfigFor a Last -> ConfigFor a Identity
 
 gist :: Gist a => Config -> a -> Doc ann
 gist = gistPrec 0
@@ -257,32 +279,73 @@ gistPrec :: Gist a => Int -> Config -> a -> Doc ann
 gistPrec prec conf val =
   runGistRunner (gistM prec val) $ GistContext (GistPath []) conf
 
-data ConfigForList f = ConfigForList
+data ConfigFloating f = ConfigFloating
+  { printfFmt :: f (Maybe String)
+  }
+instance Semigroup (ConfigFloating Last) where
+  a <> b = ConfigFloating (printfFmt a <> printfFmt b)
+instance Monoid (ConfigFloating Last) where
+  mempty = ConfigFloating mempty
+
+instance Configurable Floating where
+  type ConfigFor Floating f = ConfigFloating f
+
+instance Configurable Float where
+  type ConfigFor Float f = ConfigFor Floating f
+
+instance Gist Float where
+  type GistPathComponents Float = CL Floating :& Float
+  renderM _ (ConfigFloating {..}) f = pure $ case runIdentity printfFmt of
+    Nothing  -> PP.viaShow f
+    Just fmt -> PP.pretty (Printf.printf fmt f :: String)
+  reifyConfig ConfigFloating {..} =
+    ConfigFloating (Identity $ fromLast Nothing printfFmt)
+
+instance Configurable Double where
+  type ConfigFor Double f = ConfigFor Floating f
+
+instance Gist Double where
+  type GistPathComponents Double = CL Floating :& Double
+  renderM _ (ConfigFloating {..}) f = pure $ case runIdentity printfFmt of
+    Nothing  -> PP.viaShow f
+    Just fmt -> PP.pretty (Printf.printf fmt f :: String)
+  reifyConfig ConfigFloating {..} =
+    ConfigFloating (Identity $ fromLast Nothing printfFmt)
+
+-- | newtype deriving doesn't work for Gist because of GistPathComponents.
+newtype MyFloat = MyFloat Float
+  deriving newtype (Floating, Fractional, Num, Show, Configurable)
+
+instance Gist MyFloat where
+  type GistPathComponents MyFloat = CL Floating :& MyFloat
+  renderM prec conf (MyFloat f) = renderM prec conf f
+  reifyConfig = reifyConfig @Float
+
+data ConfigList f = ConfigList
   { showFirst :: f (Maybe Int)
   }
-instance Semigroup (ConfigForList Last) where
-  a <> b = ConfigForList (showFirst a <> showFirst b)
-instance Monoid (ConfigForList Last) where
-  mempty = ConfigForList mempty
+instance Semigroup (ConfigList Last) where
+  a <> b = ConfigList (showFirst a <> showFirst b)
+instance Monoid (ConfigList Last) where
+  mempty = ConfigList mempty
 
 instance Configurable [] where
-  type ConfigFor [] f = ConfigForList f
+  type ConfigFor [] f = ConfigList f
 
 instance Typeable a => Configurable [a] where
   type ConfigFor [a] f = ConfigFor [] f
 
 instance Gist a => Gist [a] where
   type GistPathComponents [a] = CL [] :& [a]
-  renderM _ (ConfigForList {..}) xs = do
+  renderM _ (ConfigList {..}) xs = do
     elems <- case runIdentity showFirst of
       Nothing -> mapM (gistM 0) xs
       Just n  -> case splitAt n xs of
         (start, []   ) -> mapM (gistM 0) start
         (start, _ : _) -> (++ ["..."]) <$> mapM (gistM 0) start
     pure $ PP.align $ PP.list elems
-  configFor path conf = ConfigForList (Identity $ fromLast Nothing showFirst)
-   where
-    ConfigForList {..} = configLookups @(GistPathComponents [a]) path conf
+  reifyConfig ConfigList {..} =
+    ConfigList (Identity $ fromLast Nothing showFirst)
 
 fromLast :: a -> Last a -> a
 fromLast def = \case

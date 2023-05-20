@@ -69,6 +69,20 @@ spec = do
             $ \(width, (_ :: String, QC.Blind context)) ->
                 layout width (gist (context <$> args) input) `shouldBe` expected
 
+    describe "MyFloat" $ do
+      for_ tests $ \(args, input :: Gist.MyFloat, expected) -> do
+        let desc =
+              concat [show args, " / ", show input, " === ", show expected]
+        it desc $ do
+          QC.forAll
+              ((,) <$> QC.arbitrary <*> QC.elements
+                [ ("MyFloat" , QC.Blind $ Gist.strConfig @Gist.MyFloat)
+                , ("Floating", QC.Blind $ Gist.strConfig @Floating)
+                ]
+              )
+            $ \(width, (_ :: String, QC.Blind context)) ->
+                layout width (gist (context <$> args) input) `shouldBe` expected
+
   describe "gisting stringy things" $ do
     let tests :: IsString a => [([String], (a, Text), (Char, Text))]
         tests =

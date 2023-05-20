@@ -12,6 +12,7 @@ module Gist.Dynamic
   , ConfigList(..)
   , ConfigMap(..)
   , ConfigStrQuotes(..)
+  , MyFloat(..)
   ) where
 
 import           Data.Bifunctor                 ( first )
@@ -378,6 +379,16 @@ instance Configurable Floating where
             , Printf.fmtChar      = c
             }
           _ -> Left "cannot parse format specifier"
+
+-- | newtype deriving doesn't work for Gist because of lookups.
+newtype MyFloat = MyFloat Float
+  deriving newtype (Floating, Fractional, Num, Show, Configurable)
+
+instance Gist MyFloat where
+  gistPrec' _ conf (MyFloat d) =
+    case fromLast Nothing $ configLookups @(Floating :&& MyFloat) conf of
+      Nothing -> pretty d
+      Just f  -> pretty $ Printf.formatRealFloat d f ""
 
 data ConfigStrQuotes
   = ConfigStrQuotesAlways

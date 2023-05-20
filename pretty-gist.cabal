@@ -72,6 +72,7 @@ test-suite pretty-gist-test
   main-is: Spec.hs
   other-modules:
       Dynamic
+      Monadic
       Simple
       Paths_pretty_gist
   hs-source-dirs:
