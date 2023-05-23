@@ -1,3 +1,5 @@
+{-# LANGUAGE UndecidableSuperClasses #-}
+
 module Gist.Monadic where
 
 import           Control.Applicative            ( (<|>) )
@@ -6,7 +8,9 @@ import qualified Control.Monad.Trans.Reader    as R
 import qualified Data.Dynamic                  as Dyn
 import           Data.Functor                   ( (<&>) )
 import           Data.Functor.Identity          ( Identity(..) )
-import           Data.Kind                      ( Type )
+import           Data.Kind                      ( Constraint
+                                                , Type
+                                                )
 import qualified Data.List.NonEmpty            as NE
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import qualified Data.Map.Strict               as Map
@@ -220,57 +224,70 @@ instance MonadGist GistRunner where
   gistContext = GistRunner id
   localContext ctx act = GistRunner $ \_ -> runGistRunner act ctx
 
--- We use `CL` and `:&` for type-level nonempty lists of Configurables. We can't
--- use regular type-level lists `'[a, b]` because those are hetero-kinded, e.g.
--- `'[ [], [Int] ]` is forbidden.
-
 data CL a
 
 data (:&) a b -- brittany doesn't like `a :& b`.
 infixl 5 :&
 
+-- | Type level lists of configurables, `() :& a :& b :& ...`. We can't use
+-- type-level lists for this because those are hetero-kinded, e.g. you can't do
+-- @'[ '[], '[a] ]@.
+--
+-- @CL a@ is equivalent to @() :& a@ but nicer to write.
+--
+-- The types of these functions and the available instances are kinda weird, but
+-- it's what I managed to get that works.
 class Configurables as where
-  type ConfigLookupsResult as (f :: Type -> Type) :: Type
-  configLookups :: GistPath -> Config -> ConfigLookupsResult as Last
+  type CanDoLookups as x :: Constraint
+  configLookups :: CanDoLookups as x => GistPath -> Config -> (x -> x)
+  toPathComponents :: NonEmpty SomeTypeRep -> NonEmpty SomeTypeRep
 
-  toPathComponents :: NonEmpty SomeTypeRep
+instance Configurables () where
+  type CanDoLookups () x = ()
+  configLookups _ _ = id
+  toPathComponents = id
 
 instance Configurable a => Configurables (CL a) where
-  type ConfigLookupsResult (CL a) f = ConfigFor a f
-  configLookups    = configLookup @a
-
-  toPathComponents = someTypeRep (Proxy @a) :| []
+  type CanDoLookups (CL a) x = (ConfigFor a Last ~ x)
+  configLookups path conf acc = configLookup @a path conf <> acc
+  toPathComponents acc = (someTypeRep (Proxy @a) :| []) <> acc
 
 instance
   ( Configurables as
   , Configurable b
-  , ConfigFor b Last ~ ConfigLookupsResult as Last
   ) => Configurables (as :& b) where
-  type ConfigLookupsResult (as :& b) f = ConfigFor b f
-  configLookups path conf =
-    configLookups @as path conf <> configLookup @b path conf
+  type CanDoLookups (as :& b) x = (CanDoLookups as x, ConfigFor b Last ~ x)
+  configLookups path conf acc =
+    configLookups @as path conf (configLookup @b path conf <> acc)
 
   -- This is O(n^2), but I like having `CL` at the beginning of the list, and n
   -- is small.
-  toPathComponents = toPathComponents @as <> toPathComponents @(CL b)
+  toPathComponents acc = toPathComponents @as $ toPathComponents @(CL b) acc
 
+-- | This needs @UndecidableSuperClasses@. We could put the 'Configurables' and
+-- 'CanDoLookups' constraints into the signature of 'gistM' instead, but then we
+-- also need them in 'gist', 'gistPrec', the context of the @[a]@ instance...
 class
   ( Configurable a
   , Configurables (GistPathComponents a)
-  , ConfigLookupsResult (GistPathComponents a) Last ~ ConfigFor a Last
+  , CanDoLookups (GistPathComponents a) (ConfigFor a Last)
   ) => Gist a
  where
-  gistM :: MonadGist m => Int -> a -> m (Doc ann)
-  gistM prec val = do
-    path <- gistPath
-    confLast <- configLookups @(GistPathComponents a) path <$> gistConf
-    let conf = reifyConfig @a confLast
-    localPushPath (toPathComponents @(GistPathComponents a))
-      $ renderM prec conf val
-
   type GistPathComponents a
   renderM :: MonadGist m => Int -> ConfigFor a Identity -> a -> m (Doc ann)
   reifyConfig :: ConfigFor a Last -> ConfigFor a Identity
+
+gistM :: forall m a ann . (Gist a, MonadGist m) => Int -> a -> m (Doc ann)
+gistM prec val = do
+  path <- gistPath
+  conf <- gistConf
+  let thisConf =
+        reifyConfig @a
+          $ configLookups @(GistPathComponents a) path conf
+          $ configLookup @a path conf
+  localPushPath
+      (toPathComponents @(GistPathComponents a) $ someTypeRep (Proxy @a) :| [])
+    $ renderM prec thisConf val
 
 gist :: Gist a => Config -> a -> Doc ann
 gist = gistPrec 0
@@ -294,7 +311,7 @@ instance Configurable Float where
   type ConfigFor Float f = ConfigFor Floating f
 
 instance Gist Float where
-  type GistPathComponents Float = CL Floating :& Float
+  type GistPathComponents Float = CL Floating
   renderM _ (ConfigFloating {..}) f = pure $ case runIdentity printfFmt of
     Nothing  -> PP.viaShow f
     Just fmt -> PP.pretty (Printf.printf fmt f :: String)
@@ -305,21 +322,16 @@ instance Configurable Double where
   type ConfigFor Double f = ConfigFor Floating f
 
 instance Gist Double where
-  type GistPathComponents Double = CL Floating :& Double
+  type GistPathComponents Double = CL Floating
   renderM _ (ConfigFloating {..}) f = pure $ case runIdentity printfFmt of
     Nothing  -> PP.viaShow f
     Just fmt -> PP.pretty (Printf.printf fmt f :: String)
   reifyConfig ConfigFloating {..} =
     ConfigFloating (Identity $ fromLast Nothing printfFmt)
 
--- | newtype deriving doesn't work for Gist because of GistPathComponents.
+-- | Demonstrate that newtype deriving works.
 newtype MyFloat = MyFloat Float
-  deriving newtype (Floating, Fractional, Num, Show, Configurable)
-
-instance Gist MyFloat where
-  type GistPathComponents MyFloat = CL Floating :& MyFloat
-  renderM prec conf (MyFloat f) = renderM prec conf f
-  reifyConfig = reifyConfig @Float
+  deriving newtype (Floating, Fractional, Num, Show, Configurable, Gist)
 
 data ConfigList f = ConfigList
   { showFirst :: f (Maybe Int)
@@ -336,7 +348,7 @@ instance Typeable a => Configurable [a] where
   type ConfigFor [a] f = ConfigFor [] f
 
 instance Gist a => Gist [a] where
-  type GistPathComponents [a] = CL [] :& [a]
+  type GistPathComponents [a] = CL []
   renderM _ (ConfigList {..}) xs = do
     elems <- case runIdentity showFirst of
       Nothing -> mapM (gistM 0) xs
