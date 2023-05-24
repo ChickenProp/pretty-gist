@@ -18,6 +18,7 @@ import           Data.Map.Strict                ( Map )
 import           Data.Maybe                     ( isJust )
 import           Data.Monoid                    ( Last(..) )
 import           Data.Proxy                     ( Proxy(..) )
+import           GHC.Generics                   ( Generic )
 import qualified Prettyprinter                 as PP
 import           Prettyprinter                  ( Doc )
 import qualified Text.Printf                   as Printf
@@ -274,8 +275,8 @@ class
   ) => Gist a
  where
   type GistPathComponents a
-  renderM :: MonadGist m => Int -> ConfigFor a Identity -> a -> m (Doc ann)
   reifyConfig :: ConfigFor a Last -> ConfigFor a Identity
+  renderM :: MonadGist m => Int -> ConfigFor a Identity -> a -> m (Doc ann)
 
 gistM :: forall m a ann . (Gist a, MonadGist m) => Int -> a -> m (Doc ann)
 gistM prec val = do
@@ -289,16 +290,25 @@ gistM prec val = do
       (toPathComponents @(GistPathComponents a) $ someTypeRep (Proxy @a) :| [])
     $ renderM prec thisConf val
 
-gist :: Gist a => Config -> a -> Doc ann
+gist :: Gist a => [Config] -> a -> Doc ann
 gist = gistPrec 0
 
-gistPrec :: Gist a => Int -> Config -> a -> Doc ann
-gistPrec prec conf val =
-  runGistRunner (gistM prec val) $ GistContext (GistPath []) conf
+gistPrec :: Gist a => Int -> [Config] -> a -> Doc ann
+gistPrec prec confs val =
+  runGistRunner (gistM prec val) $ GistContext (GistPath []) (mconcat confs)
+
+instance Configurable () where
+  type ConfigFor () f = Proxy f
+
+instance Gist () where
+  type GistPathComponents () = ()
+  reifyConfig _ = Proxy
+  renderM _ _ _ = pure "()"
 
 data ConfigFloating f = ConfigFloating
   { printfFmt :: f (Maybe String)
   }
+  deriving stock Generic
 instance Semigroup (ConfigFloating Last) where
   a <> b = ConfigFloating (printfFmt a <> printfFmt b)
 instance Monoid (ConfigFloating Last) where
@@ -312,22 +322,22 @@ instance Configurable Float where
 
 instance Gist Float where
   type GistPathComponents Float = CL Floating
+  reifyConfig ConfigFloating {..} =
+    ConfigFloating (Identity $ fromLast Nothing printfFmt)
   renderM _ (ConfigFloating {..}) f = pure $ case runIdentity printfFmt of
     Nothing  -> PP.viaShow f
     Just fmt -> PP.pretty (Printf.printf fmt f :: String)
-  reifyConfig ConfigFloating {..} =
-    ConfigFloating (Identity $ fromLast Nothing printfFmt)
 
 instance Configurable Double where
   type ConfigFor Double f = ConfigFor Floating f
 
 instance Gist Double where
   type GistPathComponents Double = CL Floating
+  reifyConfig ConfigFloating {..} =
+    ConfigFloating (Identity $ fromLast Nothing printfFmt)
   renderM _ (ConfigFloating {..}) f = pure $ case runIdentity printfFmt of
     Nothing  -> PP.viaShow f
     Just fmt -> PP.pretty (Printf.printf fmt f :: String)
-  reifyConfig ConfigFloating {..} =
-    ConfigFloating (Identity $ fromLast Nothing printfFmt)
 
 -- | Demonstrate that newtype deriving works.
 newtype MyFloat = MyFloat Float
@@ -336,6 +346,7 @@ newtype MyFloat = MyFloat Float
 data ConfigList f = ConfigList
   { showFirst :: f (Maybe Int)
   }
+  deriving stock Generic
 instance Semigroup (ConfigList Last) where
   a <> b = ConfigList (showFirst a <> showFirst b)
 instance Monoid (ConfigList Last) where
@@ -349,6 +360,8 @@ instance Typeable a => Configurable [a] where
 
 instance Gist a => Gist [a] where
   type GistPathComponents [a] = CL []
+  reifyConfig ConfigList {..} =
+    ConfigList (Identity $ fromLast Nothing showFirst)
   renderM _ (ConfigList {..}) xs = do
     elems <- case runIdentity showFirst of
       Nothing -> mapM (gistM 0) xs
@@ -356,8 +369,20 @@ instance Gist a => Gist [a] where
         (start, []   ) -> mapM (gistM 0) start
         (start, _ : _) -> (++ ["..."]) <$> mapM (gistM 0) start
     pure $ PP.align $ PP.list elems
-  reifyConfig ConfigList {..} =
-    ConfigList (Identity $ fromLast Nothing showFirst)
+
+instance Configurable (,) where
+  type ConfigFor (,) f = Proxy f
+
+instance Typeable a => Configurable ((,) a) where
+  type ConfigFor ((,) a) f = ConfigFor (,) f
+
+instance (Typeable a, Typeable b) => Configurable (a, b) where
+  type ConfigFor (a, b) f = ConfigFor ((,) a) f
+
+instance (Gist a, Gist b) => Gist (a, b) where
+  type GistPathComponents (a, b) = CL (,) :& ((,) a)
+  reifyConfig _ = Proxy
+  renderM _ _ (a, b) = PP.tupled <$> sequence [gistM 0 a, gistM 0 b]
 
 fromLast :: a -> Last a -> a
 fromLast def = \case

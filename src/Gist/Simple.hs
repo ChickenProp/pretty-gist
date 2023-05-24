@@ -134,7 +134,8 @@ instance Gist (a, b) where
   type Config (a, b) = ConfigTuple2 a b
   type HasDefaultConfig (a, b)
     = (Gist a, Gist b, HasDefaultConfig a, HasDefaultConfig b)
-  defaultConfig = ConfigTuple2 (ConfGister $ defaultConfig @a) (ConfGister $ defaultConfig @b)
+  defaultConfig = ConfigTuple2 (ConfGister $ defaultConfig @a)
+                               (ConfGister $ defaultConfig @b)
 
   gistPrec _ (ConfigTuple2 {..}) (a, b) =
-    "(" <> runGister gistFst a <> ", " <> runGister gistSnd b <> ")"
+    tupled [runGister gistFst a, runGister gistSnd b]
