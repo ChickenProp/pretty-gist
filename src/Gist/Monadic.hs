@@ -73,23 +73,11 @@ data FuzzyComponent
 -- untested
 matchPath :: GistPath -> PathMatcher -> Maybe (NonEmpty SomeTypeRep)
 matchPath path = \case
-  PMTail (t1 :| ts) -> do
-    GistPath (p1 : ps) <- pure path
-    guard $ t1 `elem` p1
-    case NE.nonEmpty ts of
-      Just ts' -> NE.cons t1 <$> matchPath (GistPath ps) (PMTail ts')
-      Nothing  -> Just $ NE.singleton t1
+  PMTail x -> matchPath path (PMFuzzy $ FCAny0N `NE.cons` (FCMatch <$> x))
+  PMExactPath x -> matchPath path (PMFuzzy $ FCMatch <$> x)
 
-  PMExactPath (e1 :| es) -> do
-    GistPath (p1 : ps) <- pure path
-    guard $ e1 `elem` p1
-    case NE.nonEmpty es of
-      Just es' -> NE.cons e1 <$> matchPath (GistPath ps) (PMExactPath es')
-      Nothing  -> do
-        guard $ null ps
-        Just $ NE.singleton e1
-
-  PMFuzzy fuzzy -> NE.nonEmpty =<< go (unGistPath path) (NE.toList fuzzy)
+  PMFuzzy fuzzy -> NE.nonEmpty
+    =<< go (unGistPath path) (reverse $ NE.toList fuzzy)
    where
     go [] []        = Just []
     go [] (f1 : fs) = case f1 of

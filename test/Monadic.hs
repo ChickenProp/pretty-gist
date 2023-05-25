@@ -145,43 +145,42 @@ spec = do
       expect21 $ Gist.PMTail $ someTypeRep (Proxy @[Float]) :| []
       expect22 $ Gist.PMTail $ someTypeRep (Proxy @[Int]) :| []
 
-      -- These should probably be reversed
       expect21
         $  Gist.PMTail
-        $  someTypeRep (Proxy @[])
-        :| [someTypeRep (Proxy @(,))]
+        $  someTypeRep (Proxy @(,))
+        :| [someTypeRep (Proxy @[])]
       expect21
         $  Gist.PMTail
-        $  someTypeRep (Proxy @[])
-        :| [someTypeRep (Proxy @((,) Float))]
+        $  someTypeRep (Proxy @((,) Float))
+        :| [someTypeRep (Proxy @[])]
       expect22
         $  Gist.PMTail
-        $  someTypeRep (Proxy @[])
-        :| [someTypeRep (Proxy @((,) Int))]
+        $  someTypeRep (Proxy @((,) Int))
+        :| [someTypeRep (Proxy @[])]
       expect21
         $  Gist.PMExactPath
-        $  someTypeRep (Proxy @[])
-        :| [someTypeRep (Proxy @(,))]
+        $  someTypeRep (Proxy @(,))
+        :| [someTypeRep (Proxy @[])]
       expect21
         $  Gist.PMFuzzy
-        $  Gist.FCMatch (someTypeRep (Proxy @[]))
-        :| [Gist.FCMatch $ someTypeRep (Proxy @(,))]
+        $  Gist.FCMatch (someTypeRep (Proxy @(,)))
+        :| [Gist.FCMatch (someTypeRep (Proxy @[]))]
       expect21
         $  Gist.PMFuzzy
-        $  Gist.FCMatch (someTypeRep (Proxy @[]))
-        :| [Gist.FCAny01, Gist.FCMatch $ someTypeRep (Proxy @(,))]
+        $  Gist.FCMatch (someTypeRep (Proxy @(,)))
+        :| [Gist.FCAny01, Gist.FCMatch (someTypeRep (Proxy @[]))]
       expect21
         $  Gist.PMFuzzy
-        $  Gist.FCMatch (someTypeRep (Proxy @[]))
-        :| [Gist.FCAny0N, Gist.FCMatch $ someTypeRep (Proxy @(,))]
+        $  Gist.FCMatch (someTypeRep (Proxy @(,)))
+        :| [Gist.FCAny0N, Gist.FCMatch (someTypeRep (Proxy @[]))]
       expect22
         $  Gist.PMFuzzy
-        $  Gist.FCMatch (someTypeRep (Proxy @[]))
-        :| [Gist.FCAny11, Gist.FCMatch $ someTypeRep (Proxy @(,))]
+        $  Gist.FCMatch (someTypeRep (Proxy @(,)))
+        :| [Gist.FCAny11, Gist.FCMatch (someTypeRep (Proxy @[]))]
       expect22
         $  Gist.PMFuzzy
-        $  Gist.FCMatch (someTypeRep (Proxy @[]))
-        :| [Gist.FCAny1N, Gist.FCMatch $ someTypeRep (Proxy @(,))]
+        $  Gist.FCMatch (someTypeRep (Proxy @(,)))
+        :| [Gist.FCAny1N, Gist.FCMatch (someTypeRep (Proxy @[]))]
 
 -- | It's a hassle to come up with descriptive test names, but convenient for
 -- them all to be unique. This lets us give them numbers. We can't search for
