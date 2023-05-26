@@ -54,16 +54,17 @@ class (Typeable a, Monoid (ConfigFor a Last), Typeable (ConfigFor a Last))
 -- keys and values of a map. Maybe we instead need a path component to be
 -- `(SomeTypeRep, Maybe String)`, with `Nothing` in a matcher matching any
 -- `Just` in the path?
-newtype GistPath = GistPath { unGistPath :: [NonEmpty SomeTypeRep] }
+newtype GistPath =
+  GistPath { unGistPath :: [(NonEmpty SomeTypeRep, Maybe String)] }
 
 data PathMatcher
-  = PMTail (NonEmpty SomeTypeRep)
-  | PMExactPath (NonEmpty SomeTypeRep)
+  = PMTail (NonEmpty (SomeTypeRep, [String]))
+  | PMExactPath (NonEmpty (SomeTypeRep, [String]))
   | PMFuzzy (NonEmpty FuzzyComponent)
   deriving stock (Eq, Ord, Show)
 
 data FuzzyComponent
-  = FCMatch SomeTypeRep
+  = FCMatch (SomeTypeRep, [String])
   | FCAny01
   | FCAny0N
   | FCAny11
@@ -71,7 +72,8 @@ data FuzzyComponent
   deriving stock (Eq, Ord, Show)
 
 -- untested
-matchPath :: GistPath -> PathMatcher -> Maybe (NonEmpty SomeTypeRep)
+matchPath
+  :: GistPath -> PathMatcher -> Maybe (NonEmpty (SomeTypeRep, Maybe String))
 matchPath path = \case
   PMTail x -> matchPath path (PMFuzzy $ FCAny0N `NE.cons` (FCMatch <$> x))
   PMExactPath x -> matchPath path (PMFuzzy $ FCMatch <$> x)
@@ -86,18 +88,19 @@ matchPath path = \case
       FCAny0N   -> go [] fs
       FCAny11   -> Nothing
       FCAny1N   -> Nothing
-    go (_  : _ ) []        = Nothing
-    go (p1 : ps) (f1 : fs) = case f1 of
-      FCMatch t -> do
+    go (_        : _ ) []        = Nothing
+    go ((p1, mc) : ps) (f1 : fs) = case f1 of
+      FCMatch (t, ss) -> do
         guard $ t `elem` p1
-        (t :) <$> match1
+        guard $ null ss || maybe False (`elem` ss) mc
+        ((t, mc) :) <$> match1
       FCAny01 -> match0 <|> match1
       FCAny0N -> match0 <|> matchN
       FCAny11 -> match1
       FCAny1N -> match1 <|> matchN
      where
       -- this fuzzy component consumes...
-      match0 = go (p1 : ps) fs      -- no path components
+      match0 = go ((p1, mc) : ps) fs      -- no path components
       match1 = go ps fs             -- one path component
       matchN = go ps (FCAny0N : fs) -- one or more path components
 
@@ -200,10 +203,14 @@ class Monad m => MonadGist m where
   gistPath :: m GistPath
   gistPath = gcPath <$> gistContext
 
-  localPushPath :: NonEmpty (SomeTypeRep) -> m a -> m a
-  localPushPath types act = do
+  localPushPath :: NonEmpty (SomeTypeRep) -> Maybe String -> m a -> m a
+  localPushPath types mComponent act = do
     c <- gistContext
-    let c' = c { gcPath = GistPath $ types : unGistPath (gcPath c) }
+    let c' = c
+          { gcPath = GistPath $ (types, Nothing) : case unGistPath (gcPath c) of
+                       []            -> []
+                       (ts1, _) : ts -> (ts1, mComponent) : ts
+          }
     localContext c' act
 
 newtype GistRunner a = GistRunner { runGistRunner :: GistContext -> a }
@@ -254,8 +261,8 @@ instance
   toPathComponents acc = toPathComponents @as $ toPathComponents @(CL b) acc
 
 -- | This needs @UndecidableSuperClasses@. We could put the 'Configurables' and
--- 'CanDoLookups' constraints into the signature of 'gistM' instead, but then we
--- also need them in 'gist', 'gistPrec', the context of the @[a]@ instance...
+-- 'CanDoLookups' constraints into the signature of 'subGist' instead, but then
+-- we also need them in 'gist', 'gistPrec', the context of the @[a]@ instance...
 class
   ( Configurable a
   , Configurables (GistPathComponents a)
@@ -266,8 +273,14 @@ class
   reifyConfig :: ConfigFor a Last -> ConfigFor a Identity
   renderM :: MonadGist m => Int -> ConfigFor a Identity -> a -> m (Doc ann)
 
-gistM :: forall m a ann . (Gist a, MonadGist m) => Int -> a -> m (Doc ann)
-gistM prec val = do
+subGist
+  :: forall m a ann
+   . (Gist a, MonadGist m)
+  => Int
+  -> Maybe String
+  -> a
+  -> m (Doc ann)
+subGist prec mComponent val = do
   path <- gistPath
   conf <- gistConf
   let thisConf =
@@ -276,6 +289,7 @@ gistM prec val = do
           $ configLookup @a path conf
   localPushPath
       (toPathComponents @(GistPathComponents a) $ someTypeRep (Proxy @a) :| [])
+      mComponent
     $ renderM prec thisConf val
 
 gist :: Gist a => [Config] -> a -> Doc ann
@@ -283,7 +297,8 @@ gist = gistPrec 0
 
 gistPrec :: Gist a => Int -> [Config] -> a -> Doc ann
 gistPrec prec confs val =
-  runGistRunner (gistM prec val) $ GistContext (GistPath []) (mconcat confs)
+  runGistRunner (subGist prec Nothing val)
+    $ GistContext (GistPath []) (mconcat confs)
 
 instance Configurable () where
   type ConfigFor () f = Proxy f
@@ -352,10 +367,10 @@ instance Gist a => Gist [a] where
     ConfigList (Identity $ fromLast Nothing showFirst)
   renderM _ (ConfigList {..}) xs = do
     elems <- case runIdentity showFirst of
-      Nothing -> mapM (gistM 0) xs
+      Nothing -> mapM (subGist 0 Nothing) xs
       Just n  -> case splitAt n xs of
-        (start, []   ) -> mapM (gistM 0) start
-        (start, _ : _) -> (++ ["..."]) <$> mapM (gistM 0) start
+        (start, []   ) -> mapM (subGist 0 Nothing) start
+        (start, _ : _) -> (++ ["..."]) <$> mapM (subGist 0 Nothing) start
     pure $ PP.align $ PP.list elems
 
 instance Configurable (,) where
@@ -370,7 +385,8 @@ instance (Typeable a, Typeable b) => Configurable (a, b) where
 instance (Gist a, Gist b) => Gist (a, b) where
   type GistPathComponents (a, b) = CL (,) :& ((,) a)
   reifyConfig _ = Proxy
-  renderM _ _ (a, b) = PP.tupled <$> sequence [gistM 0 a, gistM 0 b]
+  renderM _ _ (a, b) =
+    PP.tupled <$> sequence [subGist 0 (Just "fst") a, subGist 0 (Just "snd") b]
 
 fromLast :: a -> Last a -> a
 fromLast def = \case

@@ -29,6 +29,8 @@ spec = do
     layout n = PPText.renderStrict . PP.layoutPretty
       (PP.defaultLayoutOptions { PP.layoutPageWidth = PP.AvailablePerLine n 1 })
 
+  let gist80 conf val = layout 80 (gist conf val)
+
   describe "gisting floaty things" $ do
     let tests :: Floating a => [(Maybe String, a, Text)]
         tests =
@@ -90,97 +92,133 @@ spec = do
                 layout width
                        (gist [context $ field @"printfFmt" .~ pure arg] input)
                   `shouldBe` expected
+
   countingTests "Bunch of tests" $ \numberedTest -> do
     numberedTest $ do
-      layout 80 (gist [] [(), (), ()]) `shouldBe` "[(), (), ()]"
+      gist80 [] [(), (), ()] `shouldBe` "[(), (), ()]"
 
     numberedTest $ do
-      layout
-          80
-          (gist [Gist.configF @[] $ field @"showFirst" .~ pure (Just 2)]
-                [(), (), ()]
-          )
+      gist80 [Gist.configF @[] $ field @"showFirst" .~ pure (Just 2)]
+             [(), (), ()]
         `shouldBe` "[(), (), ...]"
 
-    do
-      let input      = (0.123 :: Float, [0.1 :: Float])
-          expected21 = "(0.12, [0.1])"
-          expected22 = "(0.12, [0.10])"
+    numberedTest $ do
+      gist80 [Gist.configF @[] $ \c -> c { Gist.showFirst = pure (Just 2) }]
+             [[(), (), ()], [()], [()]]
+        `shouldBe` "[[(), (), ...], [()], ...]"
 
-      numberedTest $ do
-        layout
-            80
-            (gist
-              [Gist.configF @Float $ field @"printfFmt" .~ pure (Just "%.2f")]
+  countingTests "Tuple with different types" $ \numberedTest -> do
+    let input      = (0.123 :: Float, [0.1 :: Float])
+        expected21 = "(0.12, [0.1])"
+        expected22 = "(0.12, [0.10])"
+
+    numberedTest $ do
+      gist80 [Gist.configF @Float $ field @"printfFmt" .~ pure (Just "%.2f")]
+             input
+        `shouldBe` expected22
+
+    let expect21 pm = numberedTest $ do
+          gist80
+              [ Gist.configF @Float $ field @"printfFmt" .~ pure (Just "%.2f")
+              , Gist.configPF @Float pm $ field @"printfFmt" .~ pure
+                (Just "%.1f")
+              ]
               input
-            )
-          `shouldBe` expected22
+            `shouldBe` expected21
+        expect22 pm = numberedTest $ do
+          gist80
+              [ Gist.configF @Float $ field @"printfFmt" .~ pure (Just "%.2f")
+              , Gist.configPF @Float pm $ field @"printfFmt" .~ pure
+                (Just "%.1f")
+              ]
+              input
+            `shouldBe` expected22
 
-      let expect21 pm = numberedTest $ do
-            layout
-                80
-                (gist
-                  [ Gist.configF @Float $ field @"printfFmt" .~ pure
-                    (Just "%.2f")
-                  , Gist.configPF @Float pm $ field @"printfFmt" .~ pure
-                    (Just "%.1f")
-                  ]
-                  input
-                )
-              `shouldBe` expected21
-          expect22 pm = numberedTest $ do
-            layout
-                80
-                (gist
-                  [ Gist.configF @Float $ field @"printfFmt" .~ pure
-                    (Just "%.2f")
-                  , Gist.configPF @Float pm $ field @"printfFmt" .~ pure
-                    (Just "%.1f")
-                  ]
-                  input
-                )
-              `shouldBe` expected22
+    expect21 $ Gist.PMTail $ (someTypeRep (Proxy @[]), []) :| []
+    expect21 $ Gist.PMTail $ (someTypeRep (Proxy @[Float]), []) :| []
+    expect22 $ Gist.PMTail $ (someTypeRep (Proxy @[Int]), []) :| []
 
-      expect21 $ Gist.PMTail $ someTypeRep (Proxy @[]) :| []
-      expect21 $ Gist.PMTail $ someTypeRep (Proxy @[Float]) :| []
-      expect22 $ Gist.PMTail $ someTypeRep (Proxy @[Int]) :| []
+    expect21
+      $  Gist.PMTail
+      $  (someTypeRep (Proxy @(,)), [])
+      :| [(someTypeRep (Proxy @[]), [])]
+    expect21
+      $  Gist.PMTail
+      $  (someTypeRep (Proxy @((,) Float)), [])
+      :| [(someTypeRep (Proxy @[]), [])]
+    expect22
+      $  Gist.PMTail
+      $  (someTypeRep (Proxy @((,) Int)), [])
+      :| [(someTypeRep (Proxy @[]), [])]
+    expect21
+      $  Gist.PMExactPath
+      $  (someTypeRep (Proxy @(,)), [])
+      :| [(someTypeRep (Proxy @[]), [])]
+    expect21
+      $  Gist.PMFuzzy
+      $  Gist.FCMatch (someTypeRep (Proxy @(,)), [])
+      :| [Gist.FCMatch (someTypeRep (Proxy @[]), [])]
+    expect21
+      $  Gist.PMFuzzy
+      $  Gist.FCMatch (someTypeRep (Proxy @(,)), [])
+      :| [Gist.FCAny01, Gist.FCMatch (someTypeRep (Proxy @[]), [])]
+    expect21
+      $  Gist.PMFuzzy
+      $  Gist.FCMatch (someTypeRep (Proxy @(,)), [])
+      :| [Gist.FCAny0N, Gist.FCMatch (someTypeRep (Proxy @[]), [])]
+    expect22
+      $  Gist.PMFuzzy
+      $  Gist.FCMatch (someTypeRep (Proxy @(,)), [])
+      :| [Gist.FCAny11, Gist.FCMatch (someTypeRep (Proxy @[]), [])]
+    expect22
+      $  Gist.PMFuzzy
+      $  Gist.FCMatch (someTypeRep (Proxy @(,)), [])
+      :| [Gist.FCAny1N, Gist.FCMatch (someTypeRep (Proxy @[]), [])]
 
-      expect21
-        $  Gist.PMTail
-        $  someTypeRep (Proxy @(,))
-        :| [someTypeRep (Proxy @[])]
-      expect21
-        $  Gist.PMTail
-        $  someTypeRep (Proxy @((,) Float))
-        :| [someTypeRep (Proxy @[])]
-      expect22
-        $  Gist.PMTail
-        $  someTypeRep (Proxy @((,) Int))
-        :| [someTypeRep (Proxy @[])]
-      expect21
-        $  Gist.PMExactPath
-        $  someTypeRep (Proxy @(,))
-        :| [someTypeRep (Proxy @[])]
-      expect21
-        $  Gist.PMFuzzy
-        $  Gist.FCMatch (someTypeRep (Proxy @(,)))
-        :| [Gist.FCMatch (someTypeRep (Proxy @[]))]
-      expect21
-        $  Gist.PMFuzzy
-        $  Gist.FCMatch (someTypeRep (Proxy @(,)))
-        :| [Gist.FCAny01, Gist.FCMatch (someTypeRep (Proxy @[]))]
-      expect21
-        $  Gist.PMFuzzy
-        $  Gist.FCMatch (someTypeRep (Proxy @(,)))
-        :| [Gist.FCAny0N, Gist.FCMatch (someTypeRep (Proxy @[]))]
-      expect22
-        $  Gist.PMFuzzy
-        $  Gist.FCMatch (someTypeRep (Proxy @(,)))
-        :| [Gist.FCAny11, Gist.FCMatch (someTypeRep (Proxy @[]))]
-      expect22
-        $  Gist.PMFuzzy
-        $  Gist.FCMatch (someTypeRep (Proxy @(,)))
-        :| [Gist.FCAny1N, Gist.FCMatch (someTypeRep (Proxy @[]))]
+  countingTests "Tuple with same types" $ \numberedTest -> do
+    let input      = ([0.123 :: Float], [0.1 :: Float])
+        expected11 = "([0.1], [0.1])"
+        expected12 = "([0.1], [0.10])"
+        expected21 = "([0.12], [0.1])"
+        expected22 = "([0.12], [0.10])"
+
+    numberedTest $ do
+      gist80 [Gist.configF @Float $ field @"printfFmt" .~ pure (Just "%.2f")]
+             input
+        `shouldBe` expected22
+
+    let expect result pm = numberedTest $ do
+          gist80
+              [ Gist.configF @Float $ field @"printfFmt" .~ pure (Just "%.2f")
+              , Gist.configPF @Float pm $ field @"printfFmt" .~ pure
+                (Just "%.1f")
+              ]
+              input
+            `shouldBe` result
+        expect11 = expect expected11
+        expect12 = expect expected12
+        expect21 = expect expected21
+        expect22 = expect expected22
+
+    expect21
+      $  Gist.PMExactPath
+      $  (someTypeRep (Proxy @(,)), ["snd"])
+      :| [(someTypeRep (Proxy @[]), [])]
+
+    expect12
+      $  Gist.PMExactPath
+      $  (someTypeRep (Proxy @(,)), ["fst"])
+      :| [(someTypeRep (Proxy @[]), [])]
+
+    expect11
+      $  Gist.PMExactPath
+      $  (someTypeRep (Proxy @(,)), ["fst", "snd"])
+      :| [(someTypeRep (Proxy @[]), [])]
+
+    expect22
+      $  Gist.PMExactPath
+      $  (someTypeRep (Proxy @(,)), ["other"])
+      :| [(someTypeRep (Proxy @[]), [])]
 
 -- | It's a hassle to come up with descriptive test names, but convenient for
 -- them all to be unique. This lets us give them numbers. We can't search for
