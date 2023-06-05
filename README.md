@@ -3,7 +3,7 @@
 This is an exploration of a new-to-me approach to stringification.
 
 The lowest-friction way to stringify things in Haskell is usually `show`. It
-gives the user zero ability to control how the thing is rendered.
+gives the user close to zero ability to control how the thing is rendered.
 
 The
 [`Show1`](https://hackage.haskell.org/package/base-4.18.0.0/docs/Data-Functor-Classes.html#t:Show1)
@@ -22,16 +22,20 @@ easily get:
 
 * A complicated data structure contains JSON values, and I want them rendered as
   JSON rather than as a Haskell data type. Or it contains floating-point
-  numbers, and I want them rounded to 3dp. Or strings, which I want printed
-  using C-style escapes rather than Haskell-style, and with unicode rendered.
+  numbers, and I want them rounded to 3dp with underscore separation
+  (`17_923.472`). Or strings, which I want printed using C-style escapes rather
+  than Haskell-style, and with unicode rendered.
 
-* A nested data structure might be cyclic. I want to only show three levels
-  deep.
+* A list might be infinite, and I only want to show the first ten elements. Or a
+  tree might actually be cyclic, and I want to only show three levels deep.
 
 `pretty-gist` aims to enable stuff like this. I call the rendered outputs it
 produces "gists" following Raku's use of that term, where I think the intention
 is something like "take a guess about what I'm likely to want to see here and
 show me that". But if `pretty-gist` guesses wrong, it lets you correct it.
+
+I've come up with several different approaches to this, which all have different
+things to recommend and disrecommend them. I'm writing about three of them here.
 
 ## Design goals
 
@@ -52,41 +56,83 @@ show me that". But if `pretty-gist` guesses wrong, it lets you correct it.
 I don't know how to meet all these design goals at once, but they're things I
 aim for.
 
-## Simple solution
+## Classless solution
 
 Perhaps the very simplest solution is just to write a custom renderer every time
-I need one.
+I need one. I'm not going to do that.
 
-A level up from that is to write a renderer for every data type. This is what
-you'd do in Elm (which for current purposes you can think of as "Haskell with
-fewer features, but nicer records in some ways"):
+A level up from that is to write renderers for lots of different data types. We
+can write
 
-```elm
-gistList
-  :  { showElems : Maybe Int, gistElem : a -> String }
-  -> List a
-  -> String
+```haskell
+newtype Prec = Prec Int -- precedence level, 0 - 11
+
+data ConfigMaybe = ConfigMaybe { showConstructors :: Bool }
+gistMaybe :: ConfigMaybe -> (Prec -> a -> Doc) -> Prec -> Maybe a -> Doc
+
+data ConfigList = ConfigList { showElems :: Maybe Int, ... }
+gistList :: ConfigList -> (Prec -> a -> Doc) -> [a] -> Doc
+
+data ConfigTuple2 = ConfigTuple2 { ... }
+gistTuple2
+  :: ConfigTuple2 -> (Prec -> a -> Doc) -> (Prec -> b -> Doc) -> (a, b) -> Doc
+
+data ConfigFloat = ConfigFloat { ... }
+gistFloat :: ConfigFloat -> Float -> Doc
 ```
 
-Problem: you don't want to write every config option out every time. But you
-can't provide a good default config, because it would have type
+for some data type `Doc` that supports layout. (I've been using the one from
+`prettprinter`, which has a type argument that I'm ignoring here for
+simplicity.)
 
-```elm
-defaultConfigList : { showElems : Maybe Int, gistElem : a -> String }
-```
+The `Prec` parameters here are needed for the same reason `Show` has
+`showsPrec`. Sometimes we need parentheses, and this lets us choose when we have
+them. But they clutter things up a lot. We could imagine predence being
+something that gets put into config types, but then the user needs to specify it
+everywhere; plus, a renderer might call one of its sub-renderers at two
+different precedence levels under different circumstances. So that doesn't
+really work, so we accept the clutter.
 
-and so `gistElem` in this would have to be a constant function. I suppose you
-could have `defaultConfigListString`, `defaultConfigListFloat` and so on, but
-that scales awfully.
+But essentially, we've decided that one particular config parameter is important
+enough that every instance takes it (which means every instance *knows* that
+every instance takes it). That feels kinda dirty. Is there anything else that
+ought to be given this treatment?
 
-Haskell lets us improve on this with typeclasses. We can use type families to
-let each gistable type have a separate config type.
+Anyway, this works, and it has some things to recommend it. It's incredibly
+simple, a beginner-level Haskell programmer will be able to figure out what's
+going on. If I, as the library author, make a decision you the library user
+don't like, you can just write your own function and it plugs in seamlessly. And
+if you have a type that can't normally be rendered, like a function, you can
+pick some way to render it anyway.
+
+It also has some things to disrecommend it. Most notably, it's very verbose. You
+need to specify how to render every type-parameterized node of your data
+structure. You can have default configs, but there's no "default list renderer"
+because there's no "default list element renderer". `IntMap v` can have a
+default renderer for its keys, but `Map Int v` can't.
+
+This also means that changes to your data structure are very often going to need
+to be reflected in your renderers, which sounds tedious.
+
+Another problem is, consistency is going to be hard. In the example above, I had
+`gistMaybe` take a precedence parameter, but not the others. That's because the
+others would ignore it. So either I include a useless parameter and you have to
+think about what value to pass (because you might not realize it's useless); or
+I make you think about whether that parameter is there or not. I did have them
+pass a precedence to their element renderers, but they'll always pass `0`, so
+maybe I shouldn't bother? Whatever decision I make, someone implementing their
+own renderers is going to choose differently.
+
+## One-class solution
+
+We can maybe-improve on this with typeclasses. We can use type families to let
+each gistable type have a separate config type.
 
 ```haskell
 class Gist a where
   type Config a :: Type
   defaultConfig :: Config a
-  gist :: Config a -> a -> String
+  gistPrec :: Prec -> Config a -> a -> Doc
 
 data ConfigList a = ConfigList
   { showFirst :: Maybe Int
@@ -96,50 +142,25 @@ data ConfigList a = ConfigList
 instance Gist a => Gist [a] where
   type Config [a] = ConfigList a
   defaultConfig = ConfigList { showFirst = Nothing, configElem = defaultConfig }
-  gist = ...
+  gistPrec = ...
 ```
 
-This is the foundation of what I call the "simple" approach, naming it in
-comparison to things I haven't shown you yet, which is implemented in the module
-`Gist.Simple`.
+This is the foundation of what I formerly called the "simple" approach, naming
+it in comparison to things I haven't shown you yet, which is implemented in the
+module `Gist.Simple`.
 
-We need to complicate it for various reasons. Since we want pretty-printing,
-`String` is a bad output type; for now I'm using
-[`Doc`](https://hackage.haskell.org/package/prettyprinter-1.7.1/docs/Prettyprinter.html#t:Doc)
-from `prettyprinter` but I could believe that better options exist.
-
-Also, this won't handle strings well. Other typeclasses (including `Show`) solve
+There are a few significant complications. One is, this won't handle `String`
+well, because that's just `[Char]`. Other typeclasses (including `Show`) solve
 this by having an extra method for "how to handle lists of this type"; then you
 give that method a default implementation, but override it for `Char`. This
 seems fine as a solution, by which I mean "I hate it but I don't have any better
-ideas", and it's what I've implemented in the "dynamic" approach below. But I
-haven't actually bothered to implement it here yet.
-
-The `Show` class also has some stuff to handle operator precedence. Instances
-choose whether or not to surround themselves in parentheses depending on the
-precedence level of the context, which the caller tells them. That's not
-strictly necessary here, precedence-aware classes could put that in their config
-types. But then the caller can't provide that info (because the callee might not
-accept it), so the user has to. That would suck.
-
-So instead of the `gist` method I wrote above, we actually have
-
-```haskell
-gistPrec :: Int -> Config a -> a -> Doc ann
-```
-
-(We do keep `gist`, defaulting it to `gistPrec 0`; instances which don't care
-about precedence can implement either method.)
-
-Essentially, we've decided that one particular config parameter is important
-enough that every instance takes it (and in particular, every instance *knows*
-that every instance takes it). That feels kinda dirty. Is there anything else
-that ought to be given this treatment?
+ideas". I'm not going to bother showing it here. (Also it's not actually
+implemented for this solution in the code yet.)
 
 Next: the typechecking here doesn't work very well. If we try
 
 ```haskell
-gist (defaultConfig { ... }) [True]
+gist (defaultConfig { ... }) [True] -- `gist` is `gistPrec 0`
 ```
 
 we probably mean `defaultConfig` to refer to `defaultConfig @[Bool]`. But all
@@ -147,15 +168,15 @@ GHC knows is that we mean `defaultConfig { ... }` to have type `Config [Bool]`.
 That doesn't even fully specify the type of `defaultConfig`, let alone its
 value. (We might be using the `defaultConfig` of some other instance that shares
 the same type; or that has a different type until we update it. The second
-possibility means injective type families don't help much.) So we instead need
-to write
+possibility means injective type families wouldn't help much.) So we instead
+need to write
 
 ```haskell
 gist ((defaultConfig @[Bool]) { ... }) [True]
 ```
 
-which is no fun. (That extra unnecessary-looking set of parentheses is an added
-kick in the teeth.) So we add functions `gistF` and `gistPrecF`, which replace
+which is no fun. That extra unnecessary-looking set of parentheses is an added
+kick in the teeth. So we add functions `gistF` and `gistPrecF`, which replace
 the `Config a` argument with a `Config a -> Config a` argument and apply it to
 `defaultConfig`. So now we write
 
@@ -458,7 +479,7 @@ going to evaluate them all individually.
 
 (TBC. Everything below is basically editing notes that I may incorporate
 properly later. Not really intended for public consumption but no reason not to
-publish them I guess.)
+publish them I guess. Much of the above is out of date too.)
 
 ---
 

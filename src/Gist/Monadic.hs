@@ -18,9 +18,12 @@ import           Data.Map.Strict                ( Map )
 import           Data.Maybe                     ( isJust )
 import           Data.Monoid                    ( Last(..) )
 import           Data.Proxy                     ( Proxy(..) )
+import           Data.Traversable               ( for )
 import           GHC.Generics                   ( Generic )
 import qualified Prettyprinter                 as PP
-import           Prettyprinter                  ( Doc )
+import           Prettyprinter                  ( (<+>)
+                                                , Doc
+                                                )
 import qualified Text.Printf                   as Printf
 import           Type.Reflection                ( SomeTypeRep(..)
                                                 , TypeRep
@@ -200,6 +203,19 @@ class Monad m => MonadGist m where
   gistConf :: m Config
   gistConf = gcConf <$> gistContext
 
+  -- | This pushes the config on the left, so that it's less specific than the
+  -- user's choices, and also less specific than higher-level calls to this
+  -- function. So
+  --
+  --     localPushConf c1 $ localPushConf c2 $ ...
+  --
+  -- has `c1` override `c2`, which is probably good.
+  localPushConf :: Config -> m a -> m a
+  localPushConf conf act = do
+    c <- gistContext
+    let c' = c { gcConf = conf <> gcConf c }
+    localContext c' act
+
   gistPath :: m GistPath
   gistPath = gcPath <$> gistContext
 
@@ -273,14 +289,14 @@ class
   reifyConfig :: ConfigFor a Last -> ConfigFor a Identity
   renderM :: MonadGist m => Int -> ConfigFor a Identity -> a -> m (Doc ann)
 
-subGist
+subGistPrec
   :: forall m a ann
    . (Gist a, MonadGist m)
   => Int
   -> Maybe String
   -> a
   -> m (Doc ann)
-subGist prec mComponent val = do
+subGistPrec prec mComponent val = do
   path <- gistPath
   conf <- gistConf
   let thisConf =
@@ -292,13 +308,25 @@ subGist prec mComponent val = do
       mComponent
     $ renderM prec thisConf val
 
+subGist
+  :: forall m a ann . (Gist a, MonadGist m) => Maybe String -> a -> m (Doc ann)
+subGist = subGistPrec 0
+
 gist :: Gist a => [Config] -> a -> Doc ann
 gist = gistPrec 0
 
 gistPrec :: Gist a => Int -> [Config] -> a -> Doc ann
 gistPrec prec confs val =
-  runGistRunner (subGist prec Nothing val)
+  runGistRunner (subGistPrec prec Nothing val)
     $ GistContext (GistPath []) (mconcat confs)
+
+newtype Showily a = Showily a
+instance Typeable a => Configurable (Showily a) where
+  type ConfigFor (Showily a) f = Proxy f
+instance (Show a, Typeable a) => Gist (Showily a) where
+  type GistPathComponents (Showily a) = ()
+  reifyConfig _ = Proxy
+  renderM prec _ (Showily a) = pure $ PP.pretty $ showsPrec prec a ""
 
 instance Configurable () where
   type ConfigFor () f = Proxy f
@@ -308,43 +336,64 @@ instance Gist () where
   reifyConfig _ = Proxy
   renderM _ _ _ = pure "()"
 
-data ConfigFloating f = ConfigFloating
+data ConfigPrintf f = ConfigPrintf
   { printfFmt :: f (Maybe String)
   }
   deriving stock Generic
-instance Semigroup (ConfigFloating Last) where
-  a <> b = ConfigFloating (printfFmt a <> printfFmt b)
-instance Monoid (ConfigFloating Last) where
-  mempty = ConfigFloating mempty
+instance Semigroup (ConfigPrintf Last) where
+  a <> b = ConfigPrintf (printfFmt a <> printfFmt b)
+instance Monoid (ConfigPrintf Last) where
+  mempty = ConfigPrintf mempty
+
+reifyConfigPrintf :: ConfigPrintf Last -> ConfigPrintf Identity
+reifyConfigPrintf (ConfigPrintf {..}) =
+  ConfigPrintf (Identity $ fromLast Nothing printfFmt)
+
+renderPrintf
+  :: (Show a, Printf.PrintfArg a) => ConfigPrintf Identity -> a -> Doc ann
+renderPrintf (ConfigPrintf {..}) x = case runIdentity printfFmt of
+  Nothing  -> PP.viaShow x
+  Just fmt -> PP.pretty (Printf.printf fmt x :: String)
+
+instance Configurable Int where
+  type ConfigFor Int f = ConfigPrintf f
+
+instance Gist Int where
+  type GistPathComponents Int = ()
+  reifyConfig = reifyConfigPrintf
+  renderM _ conf x = pure $ renderPrintf conf x
 
 instance Configurable Floating where
-  type ConfigFor Floating f = ConfigFloating f
+  type ConfigFor Floating f = ConfigPrintf f
 
 instance Configurable Float where
   type ConfigFor Float f = ConfigFor Floating f
 
 instance Gist Float where
   type GistPathComponents Float = CL Floating
-  reifyConfig ConfigFloating {..} =
-    ConfigFloating (Identity $ fromLast Nothing printfFmt)
-  renderM _ (ConfigFloating {..}) f = pure $ case runIdentity printfFmt of
-    Nothing  -> PP.viaShow f
-    Just fmt -> PP.pretty (Printf.printf fmt f :: String)
+  reifyConfig = reifyConfigPrintf
+  renderM _ conf x = pure $ renderPrintf conf x
 
 instance Configurable Double where
   type ConfigFor Double f = ConfigFor Floating f
 
 instance Gist Double where
   type GistPathComponents Double = CL Floating
-  reifyConfig ConfigFloating {..} =
-    ConfigFloating (Identity $ fromLast Nothing printfFmt)
-  renderM _ (ConfigFloating {..}) f = pure $ case runIdentity printfFmt of
-    Nothing  -> PP.viaShow f
-    Just fmt -> PP.pretty (Printf.printf fmt f :: String)
+  reifyConfig = reifyConfigPrintf
+  renderM _ conf x = pure $ renderPrintf conf x
 
 -- | Demonstrate that newtype deriving works.
 newtype MyFloat = MyFloat Float
   deriving newtype (Floating, Fractional, Num, Show, Configurable, Gist)
+
+data ConfigMaybe f = ConfigMaybe
+  { showConstructors :: f Bool
+  }
+  deriving stock Generic
+instance Semigroup (ConfigMaybe Last) where
+  a <> b = ConfigMaybe (showConstructors a <> showConstructors b)
+instance Monoid (ConfigMaybe Last) where
+  mempty = ConfigMaybe mempty
 
 data ConfigList f = ConfigList
   { showFirst :: f (Maybe Int)
@@ -354,6 +403,25 @@ instance Semigroup (ConfigList Last) where
   a <> b = ConfigList (showFirst a <> showFirst b)
 instance Monoid (ConfigList Last) where
   mempty = ConfigList mempty
+
+instance Configurable Maybe where
+  type ConfigFor Maybe f = ConfigMaybe f
+instance Typeable a => Configurable (Maybe a) where
+  type ConfigFor (Maybe a) f = ConfigFor Maybe f
+
+instance Gist a => Gist (Maybe a) where
+  type GistPathComponents (Maybe a) = CL Maybe
+  reifyConfig (ConfigMaybe {..}) =
+    ConfigMaybe (Identity $ fromLast False showConstructors)
+  renderM prec (ConfigMaybe {..}) = if runIdentity showConstructors
+    then \case
+      Nothing -> pure "Nothing"
+      Just x  -> do
+        renderedElem <- subGistPrec 11 Nothing x
+        pure $ parensIfPrecGT 10 prec $ "Just" <+> renderedElem
+    else \case
+      Nothing -> pure "_"
+      Just x  -> subGistPrec prec Nothing x
 
 instance Configurable [] where
   type ConfigFor [] f = ConfigList f
@@ -367,10 +435,10 @@ instance Gist a => Gist [a] where
     ConfigList (Identity $ fromLast Nothing showFirst)
   renderM _ (ConfigList {..}) xs = do
     elems <- case runIdentity showFirst of
-      Nothing -> mapM (subGist 0 Nothing) xs
+      Nothing -> mapM (subGist Nothing) xs
       Just n  -> case splitAt n xs of
-        (start, []   ) -> mapM (subGist 0 Nothing) start
-        (start, _ : _) -> (++ ["..."]) <$> mapM (subGist 0 Nothing) start
+        (start, []   ) -> mapM (subGist Nothing) start
+        (start, _ : _) -> (++ ["..."]) <$> mapM (subGist Nothing) start
     pure $ PP.align $ PP.list elems
 
 instance Configurable (,) where
@@ -386,7 +454,29 @@ instance (Gist a, Gist b) => Gist (a, b) where
   type GistPathComponents (a, b) = CL (,) :& ((,) a)
   reifyConfig _ = Proxy
   renderM _ _ (a, b) =
-    PP.tupled <$> sequence [subGist 0 (Just "fst") a, subGist 0 (Just "snd") b]
+    PP.tupled <$> sequence [subGist (Just "fst") a, subGist (Just "snd") b]
+
+parensIf :: Bool -> Doc ann -> Doc ann
+parensIf cond = if cond then PP.parens else id
+
+parensIfPrecGT :: Int -> Int -> Doc ann -> Doc ann
+parensIfPrecGT comparison prec = parensIf $ prec > comparison
+
+record
+  :: MonadGist m
+  => Int
+  -> Maybe (Doc ann)
+  -> [(Doc ann, m (Doc ann))]
+  -> m (Doc ann)
+record prec mConstr fields = do
+  renderedFields <- for fields
+    $ \(key, val) -> (\v -> key <+> "=" <+> v) <$> val
+  pure
+    $ parensIf (prec > 10 && isJust mConstr)
+    $ maybe id (\constr contents -> constr <+> PP.align contents) mConstr
+    $ PP.group
+    $ PP.encloseSep (PP.flatAlt "{ " "{") (PP.flatAlt "\n}" "}") ", "
+    $ renderedFields
 
 fromLast :: a -> Last a -> a
 fromLast def = \case

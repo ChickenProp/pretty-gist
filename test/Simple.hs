@@ -7,8 +7,10 @@ import           Data.Bool                      ( bool )
 import           Data.Foldable                  ( for_ )
 import           Data.Generics.Product          ( field
                                                 , field'
+                                                , setField
                                                 )
 import qualified Data.IORef                    as IORef
+import qualified Data.Text                     as Text
 import           Data.Text                      ( Text )
 import           Data.Void                      ( Void )
 import qualified Prettyprinter                 as PP
@@ -21,7 +23,10 @@ import qualified Test.Hspec.Core.Spec          as Hspec.Spec
 import           Test.Hspec.Expectations
 import qualified Test.QuickCheck               as QC
 
+import qualified ChessBoard.Simple             as CB
 import qualified Gist.Simple                   as Gist
+import qualified Gist.Simple                   as Gist.ConfigList
+                                                ( ConfigList(..) )
 import           Gist.Simple                    ( Gist(..) )
 
 spec :: Hspec.Spec
@@ -29,6 +34,10 @@ spec = do
   let
     layout n = PPText.renderStrict . PP.layoutPretty
       (PP.defaultLayoutOptions { PP.layoutPageWidth = PP.AvailablePerLine n 1 })
+
+  let gist80 conf val = layout 80 (gist conf val)
+      gistF80 conf val = layout 80 (gistF conf val)
+      gist_80 val = layout 80 (gist_ val)
 
   describe "gisting floaty things" $ do
     let tests :: Floating a => [(Maybe String, a, Text)]
@@ -67,64 +76,177 @@ spec = do
 
   countingTests "Bunch of tests" $ \numberedTest -> do
     numberedTest $ do
-      layout 80 (gistF id [(), (), ()]) `shouldBe` "[(), (), ()]"
+      gistF80 id [(), (), ()] `shouldBe` "[(), (), ()]"
 
     numberedTest $ do
-      layout 80 (gistF (field @"showFirst" .~ Just 2) [(), (), ()])
+      gistF80 (field @"showFirst" .~ Just 2) [(), (), ()]
         `shouldBe` "[(), (), ...]"
 
+    -- With duplicate record fields, if we don't want to use lenses, we need a
+    -- type signature to disambiguate. But this throws a warning on 9.2 and 9.4.
     numberedTest $ do
-      layout
-          80
-          (gistF
-            ( (field @"showFirst" .~ Just 2)
-            . (field @"gistElem" .~ Gist.FnGister (\_ () -> "_"))
-            )
-            [(), (), ()]
+      gistF80
+          (\c ->
+            c { Gist.gistElem = Gist.FnGister (\_ () -> "_") } :: Gist.ConfigList
+                ()
           )
+          [()]
+        `shouldBe` "[_]"
+
+    -- This is another option, no warnings, but requires a new import line.
+    numberedTest $ do
+      gistF80
+          (\c -> c { Gist.ConfigList.gistElem = Gist.FnGister (\_ () -> "_") })
+          [()]
+        `shouldBe` "[_]"
+
+    -- This one is fine because `showFirst` isn't duplicated (yet).
+    numberedTest $ do
+      gistF80
+          (\c -> c { Gist.showFirst = Just 3
+                   , Gist.gistElem  = Gist.FnGister (\_ () -> "_")
+                   }
+          )
+          [()]
+        `shouldBe` "[_]"
+
+    numberedTest $ do
+      gistF80
+          ( (field @"showFirst" .~ Just 2)
+          . (field @"gistElem" .~ Gist.FnGister (\_ () -> "_"))
+          )
+          [(), (), ()]
         `shouldBe` "[_, _, ...]"
 
     numberedTest $ do
       -- Could probably be improved with some `Gist.withConf` function that
       -- applies a function to a ConfGister.
-      layout
-          80
-          (gistF
-            ( (field @"showFirst" .~ Just 2)
-            . (field @"gistElem" .~ Gist.ConfGister
-                (defaultConfig @[()] & field @"showFirst" .~ Just 2)
-              )
+      gistF80
+          ( (field @"showFirst" .~ Just 2)
+          . (field @"gistElem" .~ Gist.ConfGister
+              (defaultConfig @[()] & field @"showFirst" .~ Just 2)
             )
-            [[(), (), ()], [(), (), ()], [(), (), ()]]
           )
+          [[(), (), ()], [(), (), ()], [(), (), ()]]
         `shouldBe` "[[(), (), ...], [(), (), ...], ...]"
 
     numberedTest $ do
-      layout
-          80
-          (gistF
-            ( (field @"showFirst" .~ Just 2)
-            . (field @"gistElem" .~ Gist.FnGister (\_ () -> "_"))
-            )
-            [(), (), ()]
+      gistF80
+          ( (field @"showFirst" .~ Just 2)
+          . (field @"gistElem" .~ Gist.FnGister (\_ () -> "_"))
           )
+          [(), (), ()]
         `shouldBe` "[_, _, ...]"
 
     numberedTest $ do
-      layout
-          80
-          (gist
-            ( defaultConfig @[Void]
+      gist80
+          ( defaultConfig @[Void]
             -- doesn't work with field in place of field', but does if we move
             -- it after the gistElem update
-            & (field' @"showFirst" .~ Just 2)
-            & (  field @"gistElem"
-              .~ Gist.FnGister (\_ f -> gistF id (f False, f True))
-              )
+          & (field' @"showFirst" .~ Just 2)
+          & (  field @"gistElem"
+            .~ Gist.FnGister (\_ f -> gistF id (f False, f True))
             )
-            [bool () ()]
           )
+          [bool () ()]
         `shouldBe` "[((), ())]"
+
+  countingTests "chessboard" $ \numberedTest -> do
+    numberedTest $ do
+      gist_80 (CB.Piece CB.Pawn CB.Black Nothing)
+        `shouldBe` "Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+
+    numberedTest $ do
+      layout (20) (gist_ (CB.Piece CB.Pawn CB.Black Nothing))
+        `shouldBe` Text.intercalate
+                     "\n"
+                     [ "Piece { pieceType = Pawn"
+                     , "      , owner = Black"
+                     , "      , lastMoved = _"
+                     , "      }"
+                     ]
+
+    numberedTest $ do
+      gistF80 (field @"singleChar" .~ True) (CB.Piece CB.Pawn CB.Black Nothing)
+        `shouldBe` "p"
+
+    numberedTest $ do
+      gist_80 CB.startPos `shouldBe` Text.intercalate
+        "\n"
+        [ "GameState { turn = White"
+        , "          , pBlackWin = 0.3463"
+        , "          , pWhiteWin = 0.3896"
+        , "          , nMoves = 0"
+        , "          , board = [ [r, n, b, q, k, b, n, r]"
+        , "                    , [p, p, p, p, p, p, p, p]"
+        , "                    , [_, _, _, _, _, _, _, _]"
+        , "                    , [_, _, _, _, _, _, _, _]"
+        , "                    , [_, _, _, _, _, _, _, _]"
+        , "                    , [_, _, _, _, _, _, _, _]"
+        , "                    , [P, P, P, P, P, P, P, P]"
+        , "                    , [R, N, B, Q, K, B, N, R] ]"
+        , "          }"
+        ]
+
+    numberedTest $ do
+      let
+        result =
+          [ "GameState { turn = White"
+          , "          , pBlackWin = 0.3463"
+          , "          , pWhiteWin = 0.3896"
+          , "          , nMoves = 0"
+          , "          , board = [ [ Piece {pieceType = Rook, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Knight, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Bishop, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Queen, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = King, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Bishop, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Knight, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Rook, owner = Black, lastMoved = _} ]"
+          , "                    , [ Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _} ]"
+          , "                    , [_, _, _, _, _, _, _, _]"
+          , "                    , [_, _, _, _, _, _, _, _]"
+          , "                    , [_, _, _, _, _, _, _, _]"
+          , "                    , [_, _, _, _, _, _, _, _]"
+          , "                    , [ Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _} ]"
+          , "                    , [ Piece {pieceType = Rook, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Knight, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Bishop, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Queen, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = King, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Bishop, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Knight, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Rook, owner = White, lastMoved = _"
+          , "                              } ] ]"
+          , "          }"
+          ]
+      gistF80
+          ( setField @"gistBoard"
+          $ Gist.defaultConfGisterF
+          $ setField @"gistElem"
+          $ Gist.defaultConfGisterF
+          $ setField @"gistElem"
+          $ Gist.defaultConfGisterF
+          $ setField @"gistElem"
+          $ Gist.defaultConfGisterF
+          $ setField @"singleChar" True
+          )
+          CB.startPos
+        `shouldBe` Text.intercalate "\n" result
 
 -- | It's a hassle to come up with descriptive test names, but convenient for
 -- them all to be unique. This lets us give them numbers. We can't search for

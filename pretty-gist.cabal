@@ -71,6 +71,10 @@ test-suite pretty-gist-test
   type: exitcode-stdio-1.0
   main-is: Spec.hs
   other-modules:
+      ChessBoard
+      ChessBoard.Classless
+      ChessBoard.Simple
+      ChessBoard.Monadic
       Dynamic
       Monadic
       Simple

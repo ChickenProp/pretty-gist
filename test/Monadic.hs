@@ -8,6 +8,7 @@ import           Data.Generics.Product          ( field )
 import qualified Data.IORef                    as IORef
 import           Data.List.NonEmpty             ( NonEmpty(..) )
 import           Data.Proxy                     ( Proxy(..) )
+import qualified Data.Text                     as Text
 import           Data.Text                      ( Text )
 import qualified Prettyprinter                 as PP
 import qualified Prettyprinter.Render.Text     as PPText
@@ -20,6 +21,7 @@ import           Test.Hspec.Expectations
 import qualified Test.QuickCheck               as QC
 import           Type.Reflection                ( someTypeRep )
 
+import qualified ChessBoard.Monadic            as CB
 import qualified Gist.Monadic                  as Gist
 import           Gist.Monadic                   ( gist )
 
@@ -219,6 +221,94 @@ spec = do
       $  Gist.PMExactPath
       $  (someTypeRep (Proxy @(,)), ["other"])
       :| [(someTypeRep (Proxy @[]), [])]
+
+  countingTests "chessboard" $ \numberedTest -> do
+    numberedTest $ do
+      gist80 [] (CB.Piece CB.Pawn CB.Black Nothing)
+        `shouldBe` "Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+
+    numberedTest $ do
+      layout 20 (gist [] (CB.Piece CB.Pawn CB.Black Nothing))
+        `shouldBe` Text.intercalate
+                     "\n"
+                     [ "Piece { pieceType = Pawn"
+                     , "      , owner = Black"
+                     , "      , lastMoved = _"
+                     , "      }"
+                     ]
+
+    numberedTest $ do
+      gist80 [Gist.configF @CB.Piece $ \c -> c { CB.singleChar = pure True }]
+             (CB.Piece CB.Pawn CB.Black Nothing)
+        `shouldBe` "p"
+
+    numberedTest $ do
+      gist80 [] CB.startPos `shouldBe` Text.intercalate
+        "\n"
+        [ "GameState { turn = White"
+        , "          , pBlackWin = 0.3463"
+        , "          , pWhiteWin = 0.3896"
+        , "          , nMoves = 0"
+        , "          , board = [ [r, n, b, q, k, b, n, r]"
+        , "                    , [p, p, p, p, p, p, p, p]"
+        , "                    , [_, _, _, _, _, _, _, _]"
+        , "                    , [_, _, _, _, _, _, _, _]"
+        , "                    , [_, _, _, _, _, _, _, _]"
+        , "                    , [_, _, _, _, _, _, _, _]"
+        , "                    , [P, P, P, P, P, P, P, P]"
+        , "                    , [R, N, B, Q, K, B, N, R] ]"
+        , "          }"
+        ]
+
+    numberedTest $ do
+      let
+        result =
+          [ "GameState { turn = White"
+          , "          , pBlackWin = 0.3463"
+          , "          , pWhiteWin = 0.3896"
+          , "          , nMoves = 0"
+          , "          , board = [ [ Piece {pieceType = Rook, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Knight, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Bishop, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Queen, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = King, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Bishop, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Knight, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Rook, owner = Black, lastMoved = _} ]"
+          , "                    , [ Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _} ]"
+          , "                    , [_, _, _, _, _, _, _, _]"
+          , "                    , [_, _, _, _, _, _, _, _]"
+          , "                    , [_, _, _, _, _, _, _, _]"
+          , "                    , [_, _, _, _, _, _, _, _]"
+          , "                    , [ Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _} ]"
+          , "                    , [ Piece {pieceType = Rook, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Knight, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Bishop, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Queen, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = King, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Bishop, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Knight, owner = White, lastMoved = _}"
+          , "                      , Piece {pieceType = Rook, owner = White, lastMoved = _"
+          , "                              } ] ]"
+          , "          }"
+          ]
+      gist80 [Gist.configF @CB.Piece $ field @"singleChar" .~ pure False]
+             CB.startPos
+        `shouldBe` Text.intercalate "\n" result
 
 -- | It's a hassle to come up with descriptive test names, but convenient for
 -- them all to be unique. This lets us give them numbers. We can't search for

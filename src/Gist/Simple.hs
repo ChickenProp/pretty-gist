@@ -1,13 +1,21 @@
 module Gist.Simple
   ( Gist(..)
   , Gister(..)
-  , ConfigFloating(..)
+  , Showily(..)
+  , ConfigPrintf(..)
+  , ConfigMaybe(..)
+  , ConfigList(..)
+  , ConfigSet(..)
   , MyFloat(..)
+  , defaultConfGisterF
+  , runGister
+  , record
   ) where
 
 import           Data.Kind                      ( Constraint
                                                 , Type
                                                 )
+import           Data.Maybe                     ( isJust )
 import qualified Data.Set                      as Set
 import           Data.Set                       ( Set )
 import           Data.Void                      ( Void
@@ -36,11 +44,15 @@ class Gist a where
   gistPrecF
     :: HasDefaultConfig a => Int -> (Config a -> Config a) -> a -> Doc ann
   gistF :: HasDefaultConfig a => (Config a -> Config a) -> a -> Doc ann
+  gistPrec_ :: HasDefaultConfig a => Int -> a -> Doc ann
+  gist_ :: HasDefaultConfig a => a -> Doc ann
 
   gist = gistPrec 0
   gistPrec _ = gist
   gistF f = gist (f $ defaultConfig @a)
   gistPrecF p f = gistPrec p (f $ defaultConfig @a)
+  gist_ = gist (defaultConfig @a)
+  gistPrec_ prec = gistPrec prec (defaultConfig @a)
 
 -- brittany doesn't handle GADT syntax for this.
 -- data Gister a where
@@ -51,6 +63,13 @@ data Gister a
   | Gist a => ConfGister (Config a)
 -- cannot derive generic
 
+defaultConfGisterF
+  :: forall a
+   . (Gist a, HasDefaultConfig a)
+  => (Config a -> Config a)
+  -> Gister a
+defaultConfGisterF f = ConfGister $ f $ defaultConfig @a
+
 runGisterPrec :: Int -> Gister a -> a -> Doc ann
 runGisterPrec prec = \case
   FnGister   f -> f prec
@@ -59,32 +78,54 @@ runGisterPrec prec = \case
 runGister :: Gister a -> a -> Doc ann
 runGister = runGisterPrec 0
 
+newtype Showily a = Showily a
+instance Show a => Gist (Showily a) where
+  type Config (Showily a) = ()
+  type HasDefaultConfig (Showily a) = ()
+  gistPrec prec _ (Showily a) = pretty $ showsPrec prec a ""
+
 instance Gist Void where
   gist _ = absurd
 
 instance Gist () where
   gist _ _ = "()"
 
-data ConfigFloating = ConfigFloating
+data ConfigMaybe a = ConfigMaybe
+  { showConstructors :: Bool
+  , gistElem         :: Gister a
+  }
+  deriving stock Generic
+
+instance Gist (Maybe a) where
+  type Config (Maybe a) = ConfigMaybe a
+  type HasDefaultConfig (Maybe a) = (Gist a, HasDefaultConfig a)
+  defaultConfig = ConfigMaybe False (ConfGister $ defaultConfig @a)
+
+  gistPrec prec (ConfigMaybe {..}) = if showConstructors
+    then \case
+      Nothing -> "Nothing"
+      Just x  -> parensIfPrecGT 10 prec $ "Just" <+> runGisterPrec 11 gistElem x
+    else \case
+      Nothing -> "_"
+      Just x  -> runGisterPrec prec gistElem x
+
+data ConfigPrintf = ConfigPrintf
   { printfFmt :: Maybe String
   }
   deriving stock Generic
 
-instance Gist Float where
-  type Config Float = ConfigFloating
-  defaultConfig = ConfigFloating Nothing
+newtype Printfily a = Printfily a
+instance (Show a, Printf.PrintfArg a) => Gist (Printfily a) where
+  type Config (Printfily a) = ConfigPrintf
+  defaultConfig = ConfigPrintf Nothing
 
-  gistPrec _ conf f = case printfFmt conf of
-    Nothing  -> viaShow f
-    Just fmt -> pretty (Printf.printf fmt f :: String)
+  gist (ConfigPrintf {..}) (Printfily a) = case printfFmt of
+    Nothing  -> viaShow a
+    Just fmt -> pretty (Printf.printf fmt a :: String)
 
-instance Gist Double where
-  type Config Double = Config Float
-  defaultConfig = defaultConfig @Float
-
-  gistPrec _ conf d = case printfFmt conf of
-    Nothing  -> viaShow d
-    Just fmt -> pretty (Printf.printf fmt d :: String)
+deriving via Printfily Int instance Gist Int
+deriving via Printfily Float instance Gist Float
+deriving via Printfily Double instance Gist Double
 
 -- | Demonstrate that newtype deriving works.
 newtype MyFloat = MyFloat Float
@@ -139,3 +180,18 @@ instance Gist (a, b) where
 
   gistPrec _ (ConfigTuple2 {..}) (a, b) =
     tupled [runGister gistFst a, runGister gistSnd b]
+
+parensIf :: Bool -> Doc ann -> Doc ann
+parensIf cond = if cond then parens else id
+
+parensIfPrecGT :: Int -> Int -> Doc ann -> Doc ann
+parensIfPrecGT comparison prec = parensIf $ prec > comparison
+
+record :: Int -> Maybe (Doc ann) -> [(Doc ann, Doc ann)] -> Doc ann
+record prec mConstr fields =
+  parensIf (prec > 10 && isJust mConstr)
+    $ maybe id (\constr contents -> constr <+> align contents) mConstr
+    $ group
+    $ encloseSep (flatAlt "{ " "{") (flatAlt "\n}" "}") ", "
+    $ flip map fields
+    $ \(key, val) -> key <+> "=" <+> val
