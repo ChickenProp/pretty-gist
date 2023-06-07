@@ -123,6 +123,13 @@ pass a precedence to their element renderers, but they'll always pass `0`, so
 maybe I shouldn't bother? Whatever decision I make, someone implementing their
 own renderers is going to choose differently.
 
+Those are problems for users. There's also a problem for implementers: roughly
+speaking, you're going to be providing config for every field of every
+constructor of your type. For non-parameterized types (like the keys of an
+`IntMap`) that can be in the actual config type, and for parameterized types
+(like the keys of a `Map`) it comes in separate arguments later, but it's going
+to be there. That's going to be tedious for you.
+
 ## One-class solution
 
 We can maybe-improve on this with typeclasses. We can use type families to let
@@ -145,9 +152,8 @@ instance Gist a => Gist [a] where
   gistPrec = ...
 ```
 
-This is the foundation of what I formerly called the "simple" approach, naming
-it in comparison to things I haven't shown you yet, which is implemented in the
-module `Gist.Simple`.
+This is the foundation of what I formerly called the "simple" approach, which is
+implemented in the module `Gist.Simple`.
 
 There are a few significant complications. One is, this won't handle `String`
 well, because that's just `[Char]`. Other typeclasses (including `Show`) solve
@@ -195,11 +201,11 @@ It turns out we can handle this case. Consider the type
 
 ```haskell
 data Gister a where
-  FnGister :: (forall ann . Int -> a -> Doc ann) -> Gister a
+  FnGister :: (Int -> a -> Doc) -> Gister a
   ConfGister :: Gist a => Config a -> Gister a
 
-runGister :: Int -> Gister a -> a -> Doc ann
-runGister prec = \case
+runGisterPrec :: Int -> Gister a -> a -> Doc
+runGisterPrec prec = \case
   FnGister   f -> f prec
   ConfGister c -> gistPrec prec c
 ```
@@ -211,14 +217,14 @@ our own rendering function.
 This lets us have an instance `Gist [a]` without first requiring `Gist a`. We
 can't have a (useful) default config in that case, the only fully general
 `Gister a`s we could write would ignore the value they're passed. But we can
-resolve that:
+still have a default when we do have `Gist a` (assuming it has its own default):
 
 ```haskell
 class Gist a where
   type Config a :: Type
   type HasDefaultConfig a :: Constraint
   defaultConfig :: HasDefaultConfig a => Config a
-  gistPrec :: Int -> Config a -> a -> Doc ann
+  gistPrec :: Int -> Config a -> a -> Doc
 
 data ConfigList a = ConfigList
   { showFirst :: Maybe Int
@@ -241,43 +247,63 @@ might like, because we can't derive a `Generic` instance for `Gister a` which
 means we can't use generic-lens or generic-optics. Fine in this case, annoying
 for nested structures, might be able to improve.
 
-And that's just about everything.
+And that's just about everything for this solution.
 
-So why wasn't I happy with this solution? Why did I go looking for others? There
-are two or three specific problems I was trying to solve.
+So this preserves a lot of the good stuff about the classless solution. It's
+still reasonably simple as Haskell code, at least according to my judgment. We
+can still render any type, though it would be even simpler if we removed that
+option. And the user can still completely override the implementer if they want,
+though not as seamlessly as before.
 
-There's a problem for implementers. As an implementer, you're responsible for
-capturing and passing on configuration for, roughly speaking, every field of
-every constructor of your type. If e.g. the `IntMap` instance forgets that
-people might want to configure how it renders the keys, then the keys won't be
-configurable.
+And it's usually going to be a lot less verbose, with less need to change when
+your data structure changes. If the bits you've configured haven't changed, you
+should be good.
 
-I think the other approaches I have kinda mitigate this problem, but I wouldn't
-say "solve". The `Gister` thing also mitigates it, since users can essentially
-write their own instances, but I didn't come up with it until after I'd gone
-exploring. Also there might be clever things people can do with various forms of
-generic (not necessarily `Generic`) traversal.
+But there's still things not to like. For one, the tedious-for-implementers
+thing hasn't changed.
 
-There's also a problem for users. As a user, I expect that you'll usually want
-to configure every value of a type in the same way, at any given call to `gist`.
-If you have a `[(Float, Float)]`, you probably want to render the `fst`s the
-same as the `snd`s.
+For another, if a type shows up at multiple places in the data structure, you
+probably want to render it the same in all of those places; if you have a
+`[(Float, Float)]` you probably want to render the `fst`s the same as the
+`snd`s. But to do that you have to remember every place it might show up and
+configure them all separately; and if it starts showing up in a new place, it's
+probably easy for you to forget to configure that one.
 
-But to do that, you just have to find every place in your data structure that
-has or might have a Float, and configure them all. I think the other approaches
-I have mostly solve this problem, but with added complexity when you don't want
-to do that.
+You're also going to be dealing with nested record updates, which I find
+unpleasant and have a bunch of
+[questions](https://www.reddit.com/r/haskell/comments/128aifn/monthly_hask_anything_april_2023/jepke16/)
+about. That's somewhat the case with the classless solution too, but I think
+less deeply nested due to the structure of arguments and the lack of `Gister`.
+And here, you'll sometimes be doing type-changing record updates, and I think
+the future of those is uncertain (they're not supported by
+[`OverloadedRecordUpdate`](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/overloaded_record_update.html)).
 
-And, honestly, I wasn't enthusiastic about doing lots of record updates. There's
-a bunch of [things I don't
-know](https://www.reddit.com/r/haskell/comments/128aifn/monthly_hask_anything_april_2023/jepke16/)
-offhand about how to work with records, and I think some changes planned in
-upcoming GHC releases, but my impression was it would be kind of a pain. The
-other approaches let users do configuration through strings as well as record
-updates, but strings also kinda suck for this. But even if you stick to records,
-they let you avoid nested updates, which is nice.
+### Two-class solution
 
-Anyway, let's look at what else I came up with.
+So here's a very different approach.
+
+First, we find some way to store the config for every possible in a single data
+structure, even though we don't know all the possible configs yet.
+
+Then we make this config store available to renderers. They look up the config
+that's relevant specifically to them. When rendering their contents, they simply
+pass down the same config store. A `MonadReader` helps here.
+
+This makes "update the config of every occurrence of a type" easy. It makes
+"update the config of just this specific occurrence of a type" impossible. So we
+also track our location in the data structure, and let users say "this config
+only applies at this location" (or "at locations matching ...").
+
+(I won't be shocked to decide that this last bit is more trouble than it's
+worth.)
+
+This is currently implemented in the `Gist.Monadic` module. There's also a
+`Gist.Dynamic` module which has just the config-data-structure part, and is
+actually the implementation I've fleshed out the most. But I currently think
+it's not worth exploring more and not worth discussing in depth.
+
+...but I did previously discuss it in depth and I haven't finished writing and
+editing this README yet, so here you go:
 
 ## Dynamic solution
 
