@@ -35,6 +35,8 @@ import           Type.Reflection                ( SomeTypeRep(..)
 class (Typeable a, Monoid (ConfigFor a Last), Typeable (ConfigFor a Last))
   => Configurable a
  where
+  -- would `ConfigFor (f :: Type -> Type) a :: Type` work? Would it be nicer?
+
   -- We have to choose between this implementation:
   type ConfigFor a (f :: Type -> Type) :: Type
   type ConfigFor a f = Proxy f

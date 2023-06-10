@@ -291,16 +291,145 @@ pass down the same config store. A `MonadReader` helps here.
 
 This makes "update the config of every occurrence of a type" easy. It makes
 "update the config of just this specific occurrence of a type" impossible. So we
-also track our location in the data structure, and let users say "this config
-only applies at this location" (or "at locations matching ...").
+also track our location in the data structure, and in the config store we let
+users say "this option only applies at this location" (or "at locations matching
+...").
 
-(I won't be shocked to decide that this last bit is more trouble than it's
-worth.)
+(This last bit might just be more trouble than it's worth. But without it, I
+anticipate a decent number of situations where the library can *almost* be made
+to do what you want, but in fact is entirely useless.)
 
 This is currently implemented in the `Gist.Monadic` module. There's also a
 `Gist.Dynamic` module which has just the config-data-structure part, and is
 actually the implementation I've fleshed out the most. But I currently think
-it's not worth exploring more and not worth discussing in depth.
+it's not worth exploring more and not worth discussing in depth by itself.
+
+Somewhat simplified, here's the main stuff going on with this solution:
+
+```haskell
+-- | Opaque storage of config options
+newtype Config = UnsafeConfig { ... }
+
+-- | Things that can be put into a `Config`
+class (Typeable a, Monoid (ConfigFor a), Typeable (ConfigFor a))
+  => Configurable a
+ where
+  type ConfigFor a :: Type
+
+-- | Tracking and matching locations in the data structure
+newtype GistPath = ...
+data PathMatcher = ...
+
+data GistContext = GistContext
+  { gcPath :: GistPath
+  , gcConf :: Config
+  }
+
+-- | Things that can be rendered
+class Configurable a => Gist a where
+  renderM :: MonadReader GistContext m => Int -> a -> m Doc
+
+-- | The user-facing interface
+gist :: Gist a => [Config] -> a -> Doc
+config :: Configurable a => Maybe PathMatcher -> ConfigFor a -> Config
+```
+
+The separation between `Configurable` and `Gist` might seem unnecessary here -
+why would we configure something we can't render? The answer is that
+`Configurable` doesn't specify the kind of its argument. So we have all of
+
+```haskell
+instance Configurable Map
+instance Typeable k => Configurable (Map k)
+instance (Typeable k, Typeable v) => Configurable (Map k v)
+```
+
+and then users can add configuration for all `Map`s without needing to specify
+the exact types. (And they can override that config at specific types, if they
+want, using the `Semigroup` instance of the `ConfigFor`.) We also have `instance
+Configurable Floating`, and then the `Gist` instances for both `Float` and
+`Double` can look that up.
+
+So the flow is that users build up a `Config` data structure, specifying "for
+this type, (optionally: at this location in the data structure,) set these
+options".
+
+Then we walk through the structure. At each point we look up the relevant config
+values for the type at the current location, and possibly for other types, and
+combine all these in some way that users will just have to beat into submission
+if they're doing something complicated. And then we render, passing an updated
+`GistPath` and the same `Config` to any subcomponents.
+
+This isn't very transparent to users. The `Float` instance looks up config for
+both `Float` and `Floating`, and the `Maybe a` instance looks it up for both
+`Maybe a` and `Maybe`. But to discover these you have to either try it and see,
+or look at the source code, or read the instance docs that someone probably
+forgot to write.
+
+Also, each config option needs to have a `Monoid` instance that distinguishes
+between "this value hasn't been set" and "this value has been set to its
+default". In practice that means `Last`. But that means users don't know what
+the default value of any config option is.
+
+So the actual code complexifies the implementation in a few ways, to help users.
+Instances have a way of specifying "these are the types I look up", as long as
+those types have the same `ConfigFor`. Then looking things up from the config
+happens automatically; and there's a separate function to set default values to
+what gets looked up, which users can call manually to see what's going on. Once
+we have the defaults we no longer need `Last`, so we change to `Identity` at
+that point.
+
+We also use a custom monad class instead of `MonadReader GistContext`. For now
+it's no more powerful, but it would be easy to add a tracing function. Then if
+users had trouble figuring out what was going on, they could use that to help
+figure it out, with no additional work from implementers.
+
+So the actual implementation looks more like
+
+```haskell
+class (Typeable a, Monoid (ConfigFor a Last), Typeable (ConfigFor a Last))
+  => Configurable a
+ where
+  type ConfigFor a (f :: Type -> Type) :: Type
+
+class (Configurable a, CanDoLookups (GistPathComponents a) (ConfigFor a Last))
+  => Gist a
+ where
+  type GistLookups a
+  reifyConfig :: ConfigFor a Last -> ConfigFor a Identity
+  renderM :: MonadGist m => Int -> ConfigFor a Identity -> a -> m Doc
+
+config :: Configurable a => Maybe PathMatcher -> ConfigFor a Last -> Config
+```
+
+where `CanDoLookups` roughly ensures that `GistLookups a` is a type-level list
+of things with a given `ConfigFor`. (But we can't use `'[]` for these type-level
+lists, because you can't put types of different kinds inside one of those.)
+
+How does this fare? The big advantage over the previous solutions is the
+"configure every occurence of a type at once" thing. I anticipate this is
+usually what users want, so it's good that it's easy. Also, no nested records!
+And if I decide to add global config options - perhaps indent width - I just
+need to add them to `GistContext`.
+
+I think the big downsides are that it's wildly complicated, and we've lost the
+ability to render anything we can't write a `Gist` instance for (which also
+means users can't override implementers' decisions). But also a bunch of other
+downsides. When you do want to render different occurrences of the same type
+differently, it's awkward. You won't get errors or warnings if your config gets
+out of sync with the type you're rendering. Encapsulation is tricky, internals
+of your types might be exposed in ways you don't want.
+
+(TBC. Everything below is basically editing notes that I may incorporate
+properly later. Not really intended for public consumption but no reason not to
+publish them I guess.)
+
+---
+
+
+
+
+
 
 ...but I did previously discuss it in depth and I haven't finished writing and
 editing this README yet, so here you go:
@@ -503,11 +632,6 @@ different designs in between the Dynamic and Monadic solutions, but I'm not
 going to evaluate them all individually.
 
 
-(TBC. Everything below is basically editing notes that I may incorporate
-properly later. Not really intended for public consumption but no reason not to
-publish them I guess. Much of the above is out of date too.)
-
----
 
 
 
