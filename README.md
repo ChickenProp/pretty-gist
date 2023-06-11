@@ -56,6 +56,31 @@ things to recommend and disrecommend them. I'm writing about three of them here.
 I don't know how to meet all these design goals at once, but they're things I
 aim for.
 
+Also: I think there's a sort of hierarchy of demandingness for what sort of
+situations we expect to use the library in. From most to least demanding:
+
+* We're generating user-facing output, and we want to specify what it looks like
+  down to the glyph.
+
+* We're generating debug output. We probably don't care about the exact
+  layouting, but it would be unfortunate if we accidentally hid some data that
+  we intended to include. We can't simply edit the config and retry.
+
+* We're generating output for a test failure. It's not ideal if it stops doing
+  what we expect without warning, but it's not too bad because we can just
+  change it and rerun the test.
+
+* We're writing debug code that we don't expect to commit.
+
+In more demanding situations, we probably don't mind being more verbose, and
+updating our rendering code more often when the data structures we're working
+with change.
+
+I'm not personally working on anything where I care about glyph-level exactness,
+so that one isn't a situation I feel like optimizing for. The others are all
+things I'd like `pretty-gist` to help with, but of course the best design for
+one might not be the best design for the others.
+
 ## Classless solution
 
 Perhaps the very simplest solution is just to write a custom renderer every time
@@ -278,7 +303,7 @@ And here, you'll sometimes be doing type-changing record updates, and I think
 the future of those is uncertain (they're not supported by
 [`OverloadedRecordUpdate`](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/overloaded_record_update.html)).
 
-### Two-class solution
+## Two-class solution
 
 So here's a very different approach.
 
