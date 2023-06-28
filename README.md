@@ -13,8 +13,20 @@ classes give some control, but only in limited ways. Importantly, they only work
 on paramaterized values; you could use `Show2` to change how you render the keys
 of a `Map Int String`, but not of an `IntMap String`.
 
-Here are some use cases where I've wanted more control over rendering than I can
-easily get:
+There are also things that give you some control over layout, but not much
+control over content. For example,
+[aeson-pretty](https://hackage.haskell.org/package/aeson-pretty) lets you
+pretty-print json data, and
+[pretty-simple](https://hackage.haskell.org/package/pretty-simple) can
+pretty-print typical output from `show`. Both let you configure indent width,
+and pretty-simple additionally lets you choose some different layout styles
+(where to put newlines and parentheses) and stuff. But they both operate by a
+model where you produce a relatively simple data structure that they know how to
+deal with, they give you a few knobs and render it in full. (For aeson-pretty
+the data structure is JSON, for pretty-simple it's a custom type that they parse
+from `show` output and that's pretty good at reproducing it.)
+
+Here are some use cases where I've wanted more control than I can easily get:
 
 * My test suites generate a complicated data structure. Most of the time, most
   of this data structure is irrelevant to the test failures and I don't want to
@@ -81,13 +93,81 @@ so that one isn't a situation I feel like optimizing for. The others are all
 things I'd like `pretty-gist` to help with, but of course the best design for
 one might not be the best design for the others.
 
-## Classless solution
+## Example
+
+<table>
+<tr>
+<th>pretty-simple</th>
+<th>pretty-gist</th>
+</tr>
+<tr>
+<td>
+
+```
+GameState
+  { turn = White
+  , pBlackWin = 0.3463
+  , pWhiteWin = 0.3896
+  , nMoves = 0
+  , board = Board
+    [
+      [ Just
+        ( Piece
+          { pieceType = Rook
+          , owner = Black
+          , lastMoved = Nothing
+          }
+        )
+      , Just
+        ( Piece
+          { pieceType = Knight
+          , owner = Black
+          , lastMoved = Nothing
+          }
+      ...
+```
+
+</td>
+<td>
+
+```
+GameState { turn = White
+          , pBlackWin = 35%
+          , pWhiteWin = 39%
+          , nMoves = 0
+          , board = [ [r, n, b, q, k, b, n, r]
+                    , [p, p, p, p, p, p, p, p]
+                    , [_, _, _, _, _, _, _, _]
+                    , [_, _, _, _, _, _, _, _]
+                    , [_, _, _, _, _, _, _, _]
+                    , [_, _, _, _, _, _, _, _]
+                    , [P, P, P, P, P, P, P, P]
+                    , [R, N, B, Q, K, B, N, R]
+                    ]
+          }
+```
+</td>
+</tr>
+</table>
+
+(At this point, chess pedants may be pointing out that this data type doesn't
+capture everything you need for chess, because you can't reliably tell whether
+en passant is currently legal. Well done, chess pedants, you're very clever. Now
+shut up.)
+
+## Possible designs
+
+I've come up with several possible designs for this making different tradeoffs.
+I'm going to talk about three of them that I've actually implemented to some
+extent.
+
+### Classless solution
 
 Perhaps the very simplest solution is just to write a custom renderer every time
 I need one. I'm not going to do that.
 
-A level up from that is to write renderers for lots of different data types. We
-can write
+A level up from that is to write renderers for lots of different data types and
+combine them. We can write
 
 ```haskell
 newtype Prec = Prec Int -- precedence level, 0 - 11
@@ -155,7 +235,7 @@ constructor of your type. For non-parameterized types (like the keys of an
 (like the keys of a `Map`) it comes in separate arguments later, but it's going
 to be there. That's going to be tedious for you.
 
-## One-class solution
+### One-class solution
 
 We can maybe-improve on this with typeclasses. We can use type families to let
 each gistable type have a separate config type.
@@ -303,7 +383,7 @@ And here, you'll sometimes be doing type-changing record updates, and I think
 the future of those is uncertain (they're not supported by
 [`OverloadedRecordUpdate`](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/overloaded_record_update.html)).
 
-## Two-class solution
+### Two-class solution
 
 So here's a very different approach.
 
@@ -444,6 +524,12 @@ downsides. When you do want to render different occurrences of the same type
 differently, it's awkward. You won't get errors or warnings if your config gets
 out of sync with the type you're rendering. Encapsulation is tricky, internals
 of your types might be exposed in ways you don't want.
+
+## Examples
+
+TODO
+
+## Open questions
 
 (TBC. Everything below is basically editing notes that I may incorporate
 properly later. Not really intended for public consumption but no reason not to
