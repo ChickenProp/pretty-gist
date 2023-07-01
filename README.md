@@ -56,7 +56,8 @@ things to recommend and disrecommend them. I'm writing about three of them here.
   specific point in the data structure". "All floating-point numbers" or
   "`Float` but not `Double`".
 
-* It should pretty-print, with indentation that adjusts to the available width.
+* It should pretty-print, with indentation that adjusts to the available width
+  and configurable layout options.
 
 * It should be low boilerplate, both as a user and an implementer.
 
@@ -86,7 +87,8 @@ situations we expect to use the library in. From most to least demanding:
 
 In more demanding situations, we probably don't mind being more verbose, and
 updating our rendering code more often when the data structures we're working
-with change.
+with change. In less demanding situations, we're more likely to be satisfied
+with an 80/20 of "not quite what I want but good enough".
 
 I'm not personally working on anything where I care about glyph-level exactness,
 so that one isn't a situation I feel like optimizing for. The others are all
@@ -94,6 +96,10 @@ things I'd like `pretty-gist` to help with, but of course the best design for
 one might not be the best design for the others.
 
 ## Example
+
+Here's how pretty-simple would render a particular representation of a chess
+game. Next to it is how I'd like pretty-gist to be able to, either by default or
+with a small amount of configuration on the user's part.
 
 <table>
 <tr>
@@ -150,10 +156,30 @@ GameState { turn = White
 </tr>
 </table>
 
+So one difference is that I've gone with a hanging bracket style, with no
+newline directly after `GameState` or `board =`. I don't feel strongly about
+that. It would be nice to let users control this, but I haven't put much thought
+into it.
+
+I've also rendered the floats as percents. I haven't put much thought into this
+either, and haven't implemented it. But it seems vaguely useful and easy enough
+to have as an option, though it usually shouldn't be default.
+
+It's not visible here, but pretty-simple has the ability to colorize its output.
+That's another thing I haven't thought about, and don't currently expect
+pretty-gist to support any time soon.
+
+But the most important is rendering each `Maybe Piece` as a single character.
+There are three parts to that: a `Nothing` is rendering as `_`; a `Just` is
+simply rendering the value it contains with no wrapper; and a `Piece` is
+rendering as a single character. The combination makes it much easier to see
+most of the state of the game. You can no longer see when each piece last moved.
+But if that's not usually useful to you, it's fine not to show it by default.
+
 (At this point, chess pedants may be pointing out that this data type doesn't
-capture everything you need for chess, because you can't reliably tell whether
-en passant is currently legal. Well done, chess pedants, you're very clever. Now
-shut up.)
+capture everything you need for chess. You can't reliably tell whether
+en passant is currently legal. Maybe there are other problems too. Yes, well
+done chess pedants, you're very clever. Now shut up.)
 
 ## Possible designs
 
@@ -234,6 +260,35 @@ constructor of your type. For non-parameterized types (like the keys of an
 `IntMap`) that can be in the actual config type, and for parameterized types
 (like the keys of a `Map`) it comes in separate arguments later, but it's going
 to be there. That's going to be tedious for you.
+
+<details>
+<summary>Implementation for `Maybe`</summary>
+
+```haskell
+data ConfigMaybe = ConfigMaybe { showConstructors :: Bool }
+  deriving stock Generic
+
+defaultConfigMaybe :: ConfigMaybe
+defaultConfigMaybe = ConfigMaybe { showConstructors = False }
+
+gistMaybe :: ConfigMaybe -> (Prec -> a -> Doc ann) -> Prec -> Maybe a -> Doc ann
+gistMaybe (ConfigMaybe {..}) renderElem prec = if showConstructors
+  then \case
+    Nothing -> "Nothing"
+    Just a  -> parensIf (prec > 10) $ "Just" <+> renderElem 11 a
+  else \case
+    Nothing -> "_"
+    Just a  -> renderElem prec a
+
+-- returns "()"
+gistMaybe defaultConfigMaybe (\_ _ -> "()") 0 (Just ())
+
+-- returns "Just ()"
+gistMaybe (defaultConfigMaybe { showConstructors = True })
+          (\_ _ -> "()") 0 (Just ())
+```
+
+</details>
 
 ### One-class solution
 

@@ -243,7 +243,7 @@ spec = do
           $ Gist.defaultConfGisterF
           $ setField @"gistElem"
           $ Gist.defaultConfGisterF
-          $ setField @"singleChar" True
+          $ setField @"singleChar" False
           )
           CB.startPos
         `shouldBe` Text.intercalate "\n" result
