@@ -1,6 +1,8 @@
 module ChessBoard where
 
 import qualified Data.Char                     as Char
+import qualified Data.Text                     as Text
+import           Data.Text                      ( Text )
 import qualified Prettyprinter                 as PP
 
 data Player = Black | White
@@ -66,4 +68,67 @@ startPos = GameState
   pawns  = replicate 8 Pawn
   empty  = replicate 8 Nothing
 
+renderedShort :: Text
+renderedShort = Text.intercalate
+  "\n"
+  [ "GameState { turn = White"
+  , "          , pBlackWin = 0.3463"
+  , "          , pWhiteWin = 0.3896"
+  , "          , nMoves = 0"
+  , "          , board = [ [r, n, b, q, k, b, n, r]"
+  , "                    , [p, p, p, p, p, p, p, p]"
+  , "                    , [_, _, _, _, _, _, _, _]"
+  , "                    , [_, _, _, _, _, _, _, _]"
+  , "                    , [_, _, _, _, _, _, _, _]"
+  , "                    , [_, _, _, _, _, _, _, _]"
+  , "                    , [P, P, P, P, P, P, P, P]"
+  , "                    , [R, N, B, Q, K, B, N, R] ]"
+  , "          }"
+  ]
 
+renderedLong :: Text
+renderedLong = Text.intercalate
+  "\n"
+  [ "GameState { turn = White"
+  , "          , pBlackWin = 0.3463"
+  , "          , pWhiteWin = 0.3896"
+  , "          , nMoves = 0"
+  , "          , board = [ [ Piece {pieceType = Rook, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = Knight, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = Bishop, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = Queen, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = King, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = Bishop, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = Knight, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = Rook, owner = Black, lastMoved = _} ]"
+  , "                    , [ Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = Black, lastMoved = _} ]"
+  , "                    , [_, _, _, _, _, _, _, _]"
+  , "                    , [_, _, _, _, _, _, _, _]"
+  , "                    , [_, _, _, _, _, _, _, _]"
+  , "                    , [_, _, _, _, _, _, _, _]"
+  , "                    , [ Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = Pawn, owner = White, lastMoved = _} ]"
+  , "                    , [ Piece {pieceType = Rook, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = Knight, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = Bishop, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = Queen, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = King, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = Bishop, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = Knight, owner = White, lastMoved = _}"
+  , "                      , Piece {pieceType = Rook, owner = White, lastMoved = _"
+  , "                              } ] ]"
+  , "          }"
+  ]

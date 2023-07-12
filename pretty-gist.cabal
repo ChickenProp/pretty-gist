@@ -52,6 +52,7 @@ common common
 library
   import: common
   exposed-modules:
+      Gist.Classless
       Gist.Dynamic
       Gist.Monadic
       Gist.Simple
@@ -75,6 +76,7 @@ test-suite pretty-gist-test
       ChessBoard.Classless
       ChessBoard.Simple
       ChessBoard.Monadic
+      Classless
       Dynamic
       Monadic
       Simple

@@ -262,7 +262,7 @@ constructor of your type. For non-parameterized types (like the keys of an
 to be there. That's going to be tedious for you.
 
 <details>
-<summary>Implementation for `Maybe`</summary>
+<summary>Implementation for <code>Maybe</code></summary>
 
 ```haskell
 data ConfigMaybe = ConfigMaybe { showConstructors :: Bool }
@@ -280,12 +280,100 @@ gistMaybe (ConfigMaybe {..}) renderElem prec = if showConstructors
     Nothing -> "_"
     Just a  -> renderElem prec a
 
--- returns "()"
+-- Renders "()".
 gistMaybe defaultConfigMaybe (\_ _ -> "()") 0 (Just ())
 
--- returns "Just ()"
+-- Renders "Just ()".
 gistMaybe (defaultConfigMaybe { showConstructors = True })
           (\_ _ -> "()") 0 (Just ())
+```
+
+</details>
+
+<details>
+<summary>Implementation for <code>GameState</code></summary>
+
+```haskell
+import qualified Gist
+import           Gist                           ( Prec )
+
+data ConfigPiece = ConfigPiece
+  { singleChar      :: Bool
+  , renderPieceType :: forall ann . Prec -> PieceType -> Doc ann
+  , renderOwner     :: forall ann . Prec -> Player -> Doc ann
+  , renderLastMoved :: forall ann . Prec -> Maybe Int -> Doc ann
+  }
+
+defaultConfigPiece :: ConfigPiece
+defaultConfigPiece = ConfigPiece
+  { singleChar      = False
+  , renderPieceType = Gist.gistShowily
+  , renderOwner     = Gist.gistShowily
+  , renderLastMoved = Gist.gistMaybe
+                        Gist.defaultConfigMaybe
+                        (const $ Gist.gistPrintfily Gist.defaultConfigPrintf)
+  }
+
+gistPiece :: ConfigPiece -> Prec -> Piece -> Doc ann
+gistPiece (ConfigPiece {..}) prec piece@(Piece {..}) = if singleChar
+  then prettyPieceChar piece
+  else Gist.record
+    prec
+    (Just "Piece")
+    [ ("pieceType", renderPieceType 0 pieceType)
+    , ("owner"    , renderOwner 0 owner)
+    , ("lastMoved", renderLastMoved 0 lastMoved)
+    ]
+
+gistBoard :: (Prec -> [[a]] -> Doc ann) -> Prec -> Board a -> Doc ann
+gistBoard renderer prec (Board a) = renderer prec a
+
+data ConfigGameState = ConfigGameState
+  { renderTurn      :: forall ann . Prec -> Player -> Doc ann
+  , renderPBlackWin :: forall ann . Prec -> Float -> Doc ann
+  , renderPWhiteWin :: forall ann . Prec -> Float -> Doc ann
+  , renderNMoves    :: forall ann . Prec -> Int -> Doc ann
+  , renderBoard     :: forall ann . Prec -> Board (Maybe Piece) -> Doc ann
+  }
+
+defaultConfigGameState :: ConfigGameState
+defaultConfigGameState = ConfigGameState
+  { renderTurn      = Gist.gistShowily
+  , renderPBlackWin = const $ Gist.gistPrintfily Gist.defaultConfigPrintf
+  , renderPWhiteWin = const $ Gist.gistPrintfily Gist.defaultConfigPrintf
+  , renderNMoves    = const $ Gist.gistPrintfily Gist.defaultConfigPrintf
+  , renderBoard     = gistBoard
+                      $ Gist.gistList Gist.defaultConfigList
+                      $ Gist.gistList Gist.defaultConfigList
+                      $ Gist.gistMaybe Gist.defaultConfigMaybe
+                      $ gistPiece
+                      $ defaultConfigPiece { singleChar = True }
+  }
+
+gistGameState :: ConfigGameState -> Prec -> GameState -> Doc ann
+gistGameState (ConfigGameState {..}) prec (GameState {..}) = Gist.record
+  prec
+  (Just "GameState")
+  [ ("turn"     , renderTurn 0 turn)
+  , ("pBlackWin", renderPBlackWin 0 pBlackWin)
+  , ("pWhiteWin", renderPWhiteWin 0 pWhiteWin)
+  , ("nMoves"   , renderNMoves 0 nMoves)
+  , ("board"    , renderBoard 0 board)
+  ]
+
+-- Renders in short form.
+CB.gistGameState CB.defaultConfigGameState 0 CB.startPos
+
+-- Renders in long form.
+let conf = CB.defaultConfigGameState
+      { CB.renderBoard = CB.gistBoard
+                         $ CB.gistList CB.defaultConfigList
+                         $ CB.gistList CB.defaultConfigList
+                         $ CB.gistMaybe CB.defaultConfigMaybe
+                         $ CB.gistPiece
+                         $ CB.defaultConfigPiece { CB.singleChar = False }
+      }
+in CB.gistGameState conf 0 CB.startPos
 ```
 
 </details>
@@ -438,6 +526,139 @@ And here, you'll sometimes be doing type-changing record updates, and I think
 the future of those is uncertain (they're not supported by
 [`OverloadedRecordUpdate`](https://ghc.gitlab.haskell.org/ghc/doc/users_guide/exts/overloaded_record_update.html)).
 
+<details>
+<summary>Implementation for <code>Maybe</code></summary>
+
+```haskell
+data ConfigMaybe a = ConfigMaybe
+  { showConstructors :: Bool
+  , gistElem :: Gister a
+  }
+  deriving stock Generic
+
+instance Gist (Maybe a) where
+  type Config (Maybe a) = ConfigMaybe a
+  type HasDefaultConfig (Maybe a) = (Gist a, HasDefaultConfig a)
+  defaultConfig = ConfigMaybe False (ConfGister $ defaultConfig @a)
+
+  gistPrec prec (ConfigMaybe {..}) = if showConstructors
+    then \case
+      Nothing -> "Nothing"
+      Just x  -> parensIf (prec > 10) $ "Just" <+> runGisterPrec 11 gistElem x
+    else \case
+      Nothing -> "_"
+      Just x  -> runGisterPrec prec gistElem x
+
+-- Renders "()". `gist_` is `gistF id`.
+gist_ (Just ())
+
+-- Renders "Just ()".
+gistF (\c -> c { showConstructors = True }) (Just ())
+```
+
+</details>
+
+<details>
+<summary>Implementation for <code>GameState</code></summary>
+
+```haskell
+import qualified Gist                          as Gist
+import           Gist                           ( Gist(..) )
+import qualified Gist                          as Gist.ConfigList
+                                                ( ConfigList(..) )
+import qualified Gist                          as Gist.ConfigMaybe
+                                                ( ConfigMaybe(..) )
+
+deriving via Gist.Showily Player instance Gist Player
+deriving via Gist.Showily PieceType instance Gist PieceType
+deriving newtype instance Gist (Board a)
+
+data ConfigPiece = ConfigPiece
+  { singleChar    :: Bool
+  , gistPieceType :: Gist.Gister PieceType
+  , gistOwner     :: Gist.Gister Player
+  , gistLastMoved :: Gist.Gister (Maybe Int)
+  }
+  deriving stock Generic
+
+instance Gist Piece where
+  type Config Piece = ConfigPiece
+  defaultConfig = ConfigPiece False
+                              (Gist.ConfGister $ defaultConfig @PieceType)
+                              (Gist.ConfGister $ defaultConfig @Player)
+                              (Gist.ConfGister $ defaultConfig @(Maybe Int))
+
+  gistPrec prec (ConfigPiece {..}) piece@(Piece {..}) = if singleChar
+    then prettyPieceChar piece
+    else Gist.record
+      prec
+      (Just "Piece")
+      [ ("pieceType", Gist.runGister gistPieceType pieceType)
+      , ("owner"    , Gist.runGister gistOwner owner)
+      , ("lastMoved", Gist.runGister gistLastMoved lastMoved)
+      ]
+
+data ConfigGameState = ConfigGameState
+  { gistTurn      :: Gist.Gister Player
+  , gistPBlackWin :: Gist.Gister Float
+  , gistPWhiteWin :: Gist.Gister Float
+  , gistNMoves    :: Gist.Gister Int
+  , gistBoard     :: Gist.Gister (Board (Maybe Piece))
+  }
+  deriving stock Generic
+
+instance Gist GameState where
+  type Config GameState = ConfigGameState
+  defaultConfig = ConfigGameState
+    { gistTurn      = Gist.defaultConfGister
+    , gistPBlackWin = Gist.defaultConfGister
+    , gistPWhiteWin = Gist.defaultConfGister
+    , gistNMoves    = Gist.defaultConfGister
+    , gistBoard     =
+      let
+        gPiece  = Gist.defaultConfGisterF $ \c -> c { singleChar = True }
+        gMPiece = Gist.defaultConfGisterF
+          $ \c -> c { Gist.ConfigMaybe.gistElem = gPiece }
+        gLMPiece = Gist.defaultConfGisterF
+          $ \c -> c { Gist.ConfigList.gistElem = gMPiece }
+        gBoard = Gist.defaultConfGisterF
+          $ \c -> c { Gist.ConfigList.gistElem = gLMPiece }
+      in
+        gBoard
+    }
+
+  gistPrec prec (ConfigGameState {..}) (GameState {..}) = Gist.record
+    prec
+    (Just "GameState")
+    [ ("turn"     , Gist.runGister gistTurn turn)
+    , ("pBlackWin", Gist.runGister gistPBlackWin pBlackWin)
+    , ("pWhiteWin", Gist.runGister gistPWhiteWin pWhiteWin)
+    , ("nMoves"   , Gist.runGister gistNMoves nMoves)
+    , ("board"    , Gist.runGister gistBoard board)
+    ]
+
+-- Renders in short form. `gist_` is `gistF id`.
+gist_ CB.startPos
+
+-- Renders in long form. This uses generic-lens to do record updates, but an
+-- approach like used in `defaultConfig` would work too:
+--     gistF (let ... in \c -> c { CB.gistBoard = gBoard }) CB.startPos
+gistF
+  ( setField @"gistBoard"
+  $ Gist.defaultConfGisterF
+  $ setField @"gistElem"
+  $ Gist.defaultConfGisterF
+  $ setField @"gistElem"
+  $ Gist.defaultConfGisterF
+  $ setField @"gistElem"
+  $ Gist.defaultConfGisterF
+  $ setField @"singleChar" False
+  )
+  CB.startPos
+```
+
+</details>
+
 ### Two-class solution
 
 So here's a very different approach.
@@ -452,12 +673,12 @@ pass down the same config store. A `MonadReader` helps here.
 This makes "update the config of every occurrence of a type" easy. It makes
 "update the config of just this specific occurrence of a type" impossible. So we
 also track our location in the data structure, and in the config store we let
-users say "this option only applies at this location" (or "at locations matching
-...").
+users say "this option only applies at this location", or "at locations matching
+...".
 
-(This last bit might just be more trouble than it's worth. But without it, I
-anticipate a decent number of situations where the library can *almost* be made
-to do what you want, but in fact is entirely useless.)
+(This last bit sounds almost more trouble than it's worth. But without it, it
+becomes impossible to handle things like "only show three levels deep of this
+self-referential data type".)
 
 This is currently implemented in the `Gist.Monadic` module. There's also a
 `Gist.Dynamic` module which has just the config-data-structure part, and is

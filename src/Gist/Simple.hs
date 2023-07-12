@@ -7,6 +7,7 @@ module Gist.Simple
   , ConfigList(..)
   , ConfigSet(..)
   , MyFloat(..)
+  , defaultConfGister
   , defaultConfGisterF
   , runGister
   , record
@@ -25,6 +26,9 @@ import           GHC.Generics                   ( Generic )
 import           Prettyprinter
 import qualified Text.Printf                   as Printf
 
+newtype Prec = Prec Int
+  deriving newtype (Eq, Ord, Num)
+
 class Gist a where
   {-# MINIMAL gist | gistPrec #-}
 
@@ -38,13 +42,13 @@ class Gist a where
   default defaultConfig :: (Config a ~ ()) => Config a
   defaultConfig = ()
 
-  gistPrec :: Int -> Config a -> a -> Doc ann
+  gistPrec :: Prec -> Config a -> a -> Doc ann
   gist :: Config a -> a -> Doc ann
 
   gistPrecF
-    :: HasDefaultConfig a => Int -> (Config a -> Config a) -> a -> Doc ann
+    :: HasDefaultConfig a => Prec -> (Config a -> Config a) -> a -> Doc ann
   gistF :: HasDefaultConfig a => (Config a -> Config a) -> a -> Doc ann
-  gistPrec_ :: HasDefaultConfig a => Int -> a -> Doc ann
+  gistPrec_ :: HasDefaultConfig a => Prec -> a -> Doc ann
   gist_ :: HasDefaultConfig a => a -> Doc ann
 
   gist = gistPrec 0
@@ -59,9 +63,12 @@ class Gist a where
 --   FnGister :: (forall ann . Int -> a -> Doc ann) -> Gister a
 --   ConfGister :: Gist a => Config a -> Gister a
 data Gister a
-  = FnGister (forall ann . Int -> a -> Doc ann)
+  = FnGister (forall ann . Prec -> a -> Doc ann)
   | Gist a => ConfGister (Config a)
 -- cannot derive generic
+
+defaultConfGister :: forall a . (Gist a, HasDefaultConfig a) => Gister a
+defaultConfGister = ConfGister $ defaultConfig @a
 
 defaultConfGisterF
   :: forall a
@@ -70,7 +77,7 @@ defaultConfGisterF
   -> Gister a
 defaultConfGisterF f = ConfGister $ f $ defaultConfig @a
 
-runGisterPrec :: Int -> Gister a -> a -> Doc ann
+runGisterPrec :: Prec -> Gister a -> a -> Doc ann
 runGisterPrec prec = \case
   FnGister   f -> f prec
   ConfGister c -> gistPrec prec c
@@ -82,7 +89,7 @@ newtype Showily a = Showily a
 instance Show a => Gist (Showily a) where
   type Config (Showily a) = ()
   type HasDefaultConfig (Showily a) = ()
-  gistPrec prec _ (Showily a) = pretty $ showsPrec prec a ""
+  gistPrec (Prec prec) _ (Showily a) = pretty $ showsPrec prec a ""
 
 instance Gist Void where
   gist _ = absurd
@@ -104,7 +111,7 @@ instance Gist (Maybe a) where
   gistPrec prec (ConfigMaybe {..}) = if showConstructors
     then \case
       Nothing -> "Nothing"
-      Just x  -> parensIfPrecGT 10 prec $ "Just" <+> runGisterPrec 11 gistElem x
+      Just x  -> parensIf (prec > 10) $ "Just" <+> runGisterPrec 11 gistElem x
     else \case
       Nothing -> "_"
       Just x  -> runGisterPrec prec gistElem x
@@ -184,10 +191,7 @@ instance Gist (a, b) where
 parensIf :: Bool -> Doc ann -> Doc ann
 parensIf cond = if cond then parens else id
 
-parensIfPrecGT :: Int -> Int -> Doc ann -> Doc ann
-parensIfPrecGT comparison prec = parensIf $ prec > comparison
-
-record :: Int -> Maybe (Doc ann) -> [(Doc ann, Doc ann)] -> Doc ann
+record :: Prec -> Maybe (Doc ann) -> [(Doc ann, Doc ann)] -> Doc ann
 record prec mConstr fields =
   parensIf (prec > 10 && isJust mConstr)
     $ maybe id (\constr contents -> constr <+> align contents) mConstr

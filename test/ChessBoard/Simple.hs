@@ -55,21 +55,22 @@ data ConfigGameState = ConfigGameState
 instance Gist GameState where
   type Config GameState = ConfigGameState
   defaultConfig = ConfigGameState
-    (Gist.ConfGister $ defaultConfig @Player)
-    (Gist.ConfGister $ defaultConfig @Float)
-    (Gist.ConfGister $ defaultConfig @Float)
-    (Gist.ConfGister $ defaultConfig @Int)
-    (Gist.ConfGister $ (defaultConfig @(Board (Maybe Piece)))
-      { Gist.ConfigList.gistElem =
-        Gist.ConfGister $ (defaultConfig @[Maybe Piece])
-          { Gist.ConfigList.gistElem =
-            Gist.ConfGister $ (defaultConfig @(Maybe Piece))
-              { Gist.ConfigMaybe.gistElem =
-                Gist.ConfGister $ (defaultConfig @Piece) { singleChar = True }
-              }
-          }
-      }
-    )
+    { gistTurn      = Gist.defaultConfGister
+    , gistPBlackWin = Gist.defaultConfGister
+    , gistPWhiteWin = Gist.defaultConfGister
+    , gistNMoves    = Gist.defaultConfGister
+    , gistBoard     =
+      let
+        gPiece  = Gist.defaultConfGisterF $ \c -> c { singleChar = True }
+        gMPiece = Gist.defaultConfGisterF
+          $ \c -> c { Gist.ConfigMaybe.gistElem = gPiece }
+        gLMPiece = Gist.defaultConfGisterF
+          $ \c -> c { Gist.ConfigList.gistElem = gMPiece }
+        gBoard = Gist.defaultConfGisterF
+          $ \c -> c { Gist.ConfigList.gistElem = gLMPiece }
+      in
+        gBoard
+    }
 
   gistPrec prec (ConfigGameState {..}) (GameState {..}) = Gist.record
     prec
