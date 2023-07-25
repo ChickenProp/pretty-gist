@@ -202,14 +202,19 @@ data ConfigMaybe = ConfigMaybe { showConstructors :: Bool }
 gistMaybe :: ConfigMaybe -> (Prec -> a -> Doc) -> Prec -> Maybe a -> Doc
 
 data ConfigList = ConfigList { showElems :: Maybe Int, ... }
-gistList :: ConfigList -> (Prec -> a -> Doc) -> [a] -> Doc
+gistList :: ConfigList -> (Prec -> a -> Doc) -> Prec -> [a] -> Doc
 
 data ConfigTuple2 = ConfigTuple2 { ... }
 gistTuple2
-  :: ConfigTuple2 -> (Prec -> a -> Doc) -> (Prec -> b -> Doc) -> (a, b) -> Doc
+  :: ConfigTuple2
+  -> (Prec -> a -> Doc)
+  -> (Prec -> b -> Doc)
+  -> Prec
+  -> (a, b)
+  -> Doc
 
 data ConfigFloat = ConfigFloat { ... }
-gistFloat :: ConfigFloat -> Float -> Doc
+gistFloat :: ConfigFloat -> Prec -> Float -> Doc
 ```
 
 for some data type `Doc` that supports layout. (I've been using the one from
@@ -225,9 +230,9 @@ different precedence levels under different circumstances. So that doesn't
 really work, so we accept the clutter.
 
 But essentially, we've decided that one particular config parameter is important
-enough that every instance takes it (which means every instance *knows* that
-every instance takes it). That feels kinda dirty. Is there anything else that
-ought to be given this treatment?
+enough that every function accepts it (which means every function expects every
+other function to accept it). That feels kinda dirty. Is there anything else
+that ought to be given this treatment?
 
 Anyway, this works, and it has some things to recommend it. It's incredibly
 simple, a beginner-level Haskell programmer will be able to figure out what's
@@ -240,26 +245,26 @@ It also has some things to disrecommend it. Most notably, it's very verbose. You
 need to specify how to render every type-parameterized node of your data
 structure. You can have default configs, but there's no "default list renderer"
 because there's no "default list element renderer". `IntMap v` can have a
-default renderer for its keys, but `Map Int v` can't.
+default renderer for its keys, but `Map Int v` can't unless you write a function
+`gistMapInt` separate from `gistMap`.
 
 This also means that changes to your data structure are very often going to need
 to be reflected in your renderers, which sounds tedious.
 
-Another problem is, consistency is going to be hard. In the example above, I had
-`gistMaybe` take a precedence parameter, but not the others. That's because the
-others would ignore it. So either I include a useless parameter and you have to
-think about what value to pass (because you might not realize it's useless); or
-I make you think about whether that parameter is there or not. I did have them
-pass a precedence to their element renderers, but they'll always pass `0`, so
-maybe I shouldn't bother? Whatever decision I make, someone implementing their
-own renderers is going to choose differently.
+Another problem is, I expect consistency to be hard. Whatever design decisions I
+make, they're not enforced through anything. So someone who disagrees with them,
+or simply isn't paying attention to them, can easily make different ones, and
+then users need to remember things. (E.g. I had `gistList`, `gistTuple2` and
+`gistFloat` both take precedence parameters, but they'll completely ignore them.
+So maybe someone in a similar situation decides not to bother with those
+parameters.)
 
 Those are problems for users. There's also a problem for implementers: roughly
-speaking, you're going to be providing config for every field of every
-constructor of your type. For non-parameterized types (like the keys of an
-`IntMap`) that can be in the actual config type, and for parameterized types
-(like the keys of a `Map`) it comes in separate arguments later, but it's going
-to be there. That's going to be tedious for you.
+speaking, you're going to be allowing the user to pass a renderer for every
+field of every constructor of your type. For non-parameterized types (like the
+keys of an `IntMap`) that can be in the actual config type, and for
+parameterized types (like the keys of a `Map`) it comes in separate arguments
+later, but it's going to be there. That's going to be tedious for you.
 
 <details>
 <summary>Implementation for <code>Maybe</code></summary>
@@ -281,11 +286,13 @@ gistMaybe (ConfigMaybe {..}) renderElem prec = if showConstructors
     Just a  -> renderElem prec a
 
 -- Renders "()".
-gistMaybe defaultConfigMaybe (\_ _ -> "()") 0 (Just ())
+gistMaybe defaultConfigMaybe (\_ _ -> "()") 0 $ Just ()
 
 -- Renders "Just ()".
 gistMaybe (defaultConfigMaybe { showConstructors = True })
-          (\_ _ -> "()") 0 (Just ())
+          (\_ _ -> "()")
+          0
+  $ Just ()
 ```
 
 </details>
@@ -295,7 +302,8 @@ gistMaybe (defaultConfigMaybe { showConstructors = True })
 
 ```haskell
 import qualified Gist
-import           Gist                           ( Prec )
+import           Gist ( Prec )
+import qualified Gist as Gist.ConfigMaybe ( ConfigMaybe(..) )
 
 data ConfigPiece = ConfigPiece
   { singleChar      :: Bool
@@ -309,9 +317,7 @@ defaultConfigPiece = ConfigPiece
   { singleChar      = False
   , renderPieceType = Gist.gistShowily
   , renderOwner     = Gist.gistShowily
-  , renderLastMoved = Gist.gistMaybe
-                        Gist.defaultConfigMaybe
-                        (const $ Gist.gistPrintfily Gist.defaultConfigPrintf)
+  , renderLastMoved = Gist.gistMaybe Gist.defaultConfigMaybe Gist.gistShowily
   }
 
 gistPiece :: ConfigPiece -> Prec -> Piece -> Doc ann
@@ -339,9 +345,9 @@ data ConfigGameState = ConfigGameState
 defaultConfigGameState :: ConfigGameState
 defaultConfigGameState = ConfigGameState
   { renderTurn      = Gist.gistShowily
-  , renderPBlackWin = const $ Gist.gistPrintfily Gist.defaultConfigPrintf
-  , renderPWhiteWin = const $ Gist.gistPrintfily Gist.defaultConfigPrintf
-  , renderNMoves    = const $ Gist.gistPrintfily Gist.defaultConfigPrintf
+  , renderPBlackWin = Gist.gistShowily
+  , renderPWhiteWin = Gist.gistShowily
+  , renderNMoves    = Gist.gistShowily
   , renderBoard     = gistBoard
                       $ Gist.gistList Gist.defaultConfigList
                       $ Gist.gistList Gist.defaultConfigList
@@ -362,18 +368,36 @@ gistGameState (ConfigGameState {..}) prec (GameState {..}) = Gist.record
   ]
 
 -- Renders in short form.
-CB.gistGameState CB.defaultConfigGameState 0 CB.startPos
+gistGameState defaultConfigGameState 0 startPos
 
 -- Renders in long form.
-let conf = CB.defaultConfigGameState
-      { CB.renderBoard = CB.gistBoard
-                         $ CB.gistList CB.defaultConfigList
-                         $ CB.gistList CB.defaultConfigList
-                         $ CB.gistMaybe CB.defaultConfigMaybe
-                         $ CB.gistPiece
-                         $ CB.defaultConfigPiece { CB.singleChar = False }
+let conf = defaultConfigGameState
+      { renderBoard = gistBoard
+                      $ Gist.gistList Gist.defaultConfigList
+                      $ Gist.gistList Gist.defaultConfigList
+                      $ Gist.gistMaybe Gist.defaultConfigMaybe
+                      $ gistPiece
+                      $ defaultConfigPiece { singleChar = False }
       }
-in CB.gistGameState conf 0 CB.startPos
+in gistGameState conf 0 startPos
+
+-- Renders in fully explicit form.
+let confMaybe =
+      Gist.defaultConfigMaybe { Gist.ConfigMaybe.showConstructors = True }
+    conf      = CB.defaultConfigGameState
+      { CB.renderBoard = CB.gistBoard
+                         $ Gist.gistList Gist.defaultConfigList
+                         $ Gist.gistList Gist.defaultConfigList
+                         $ Gist.gistMaybe confMaybe
+                         $ CB.gistPiece
+                         $ CB.defaultConfigPiece
+                             { CB.singleChar      = False
+                             , CB.renderLastMoved = Gist.gistMaybe
+                                                      confMaybe
+                                                      Gist.gistShowily
+                             }
+      }
+in gistGameState conf 0 startPos
 ```
 
 </details>
@@ -515,7 +539,8 @@ probably want to render it the same in all of those places; if you have a
 `[(Float, Float)]` you probably want to render the `fst`s the same as the
 `snd`s. But to do that you have to remember every place it might show up and
 configure them all separately; and if it starts showing up in a new place, it's
-probably easy for you to forget to configure that one.
+probably easy for you to forget to configure that one. (Unlike with the
+classless solution, where you'll get type errors if you forget about it.)
 
 You're also going to be dealing with nested record updates, which I find
 unpleasant and have a bunch of
@@ -550,10 +575,10 @@ instance Gist (Maybe a) where
       Just x  -> runGisterPrec prec gistElem x
 
 -- Renders "()". `gist_` is `gistF id`.
-gist_ (Just ())
+gist_ $ Just ()
 
 -- Renders "Just ()".
-gistF (\c -> c { showConstructors = True }) (Just ())
+gistF (\c -> c { showConstructors = True }) $ Just ()
 ```
 
 </details>
@@ -562,12 +587,10 @@ gistF (\c -> c { showConstructors = True }) (Just ())
 <summary>Implementation for <code>GameState</code></summary>
 
 ```haskell
-import qualified Gist                          as Gist
-import           Gist                           ( Gist(..) )
-import qualified Gist                          as Gist.ConfigList
-                                                ( ConfigList(..) )
-import qualified Gist                          as Gist.ConfigMaybe
-                                                ( ConfigMaybe(..) )
+import qualified Gist
+import           Gist ( Gist(..) )
+import qualified Gist as Gist.ConfigList ( ConfigList(..) )
+import qualified Gist as Gist.ConfigMaybe ( ConfigMaybe(..) )
 
 deriving via Gist.Showily Player instance Gist Player
 deriving via Gist.Showily PieceType instance Gist PieceType
@@ -638,11 +661,11 @@ instance Gist GameState where
     ]
 
 -- Renders in short form. `gist_` is `gistF id`.
-gist_ CB.startPos
+gist_ startPos
 
 -- Renders in long form. This uses generic-lens to do record updates, but an
 -- approach like used in `defaultConfig` would work too:
---     gistF (let ... in \c -> c { CB.gistBoard = gBoard }) CB.startPos
+--     gistF (let ... in \c -> c { gistBoard = gBoard }) startPos
 gistF
   ( setField @"gistBoard"
   $ Gist.defaultConfGisterF
@@ -654,7 +677,30 @@ gistF
   $ Gist.defaultConfGisterF
   $ setField @"singleChar" False
   )
-  CB.startPos
+  startPos
+
+-- Renders in fully explicit form. This could also be done with standard record
+-- updates.
+gistF
+  ( setField @"gistBoard"
+  $ Gist.defaultConfGisterF
+  $ setField @"gistElem"
+  $ Gist.defaultConfGisterF
+  $ setField @"gistElem"
+  $ Gist.defaultConfGisterF
+  $ ( setField @"showConstructors" True
+    . ( setField @"gistElem"
+      $ Gist.defaultConfGisterF
+      $ ( setField @"singleChar" False
+        . ( setField @"gistLastMoved"
+          $ Gist.defaultConfGisterF
+          $ setField @"showConstructors" True
+          )
+        )
+      )
+    )
+  )
+  startPos
 ```
 
 </details>
@@ -677,8 +723,8 @@ users say "this option only applies at this location", or "at locations matching
 ...".
 
 (This last bit sounds almost more trouble than it's worth. But without it, it
-becomes impossible to handle things like "only show three levels deep of this
-self-referential data type".)
+becomes super awkward to handle things like "only show three levels deep
+of this self-referential data type".)
 
 This is currently implemented in the `Gist.Monadic` module. There's also a
 `Gist.Dynamic` module which has just the config-data-structure part, and is
@@ -688,16 +734,17 @@ it's not worth exploring more and not worth discussing in depth by itself.
 Somewhat simplified, here's the main stuff going on with this solution:
 
 ```haskell
--- | Opaque storage of config options
+-- | Opaque storage of config options, implemented with existential types. Not
+-- type-safe by construction, but has a type-safe interface.
 newtype Config = UnsafeConfig { ... }
 
--- | Things that can be put into a `Config`
+-- | Things that can be put into a `Config`.
 class (Typeable a, Monoid (ConfigFor a), Typeable (ConfigFor a))
   => Configurable a
  where
   type ConfigFor a :: Type
 
--- | Tracking and matching locations in the data structure
+-- | Tracking and matching locations in the data structure.
 newtype GistPath = ...
 data PathMatcher = ...
 
@@ -706,11 +753,11 @@ data GistContext = GistContext
   , gcConf :: Config
   }
 
--- | Things that can be rendered
+-- | Things that can be rendered.
 class Configurable a => Gist a where
   renderM :: MonadReader GistContext m => Int -> a -> m Doc
 
--- | The user-facing interface
+-- | The user-facing interface.
 gist :: Gist a => [Config] -> a -> Doc
 config :: Configurable a => Maybe PathMatcher -> ConfigFor a -> Config
 ```
@@ -773,7 +820,7 @@ class (Typeable a, Monoid (ConfigFor a Last), Typeable (ConfigFor a Last))
  where
   type ConfigFor a (f :: Type -> Type) :: Type
 
-class (Configurable a, CanDoLookups (GistPathComponents a) (ConfigFor a Last))
+class (Configurable a, CanDoLookups (GistLookups a) (ConfigFor a Last))
   => Gist a
  where
   type GistLookups a
@@ -799,623 +846,233 @@ means users can't override implementers' decisions). But also a bunch of other
 downsides. When you do want to render different occurrences of the same type
 differently, it's awkward. You won't get errors or warnings if your config gets
 out of sync with the type you're rendering. Encapsulation is tricky, internals
-of your types might be exposed in ways you don't want.
+of your types might be exposed in ways you don't want. It's not necessarily
+clear how you'd want newtypes to be configured, and newtype-deriving only gives
+you one option which might not be what you want.
 
-## Examples
-
-TODO
-
-## Open questions
-
-(TBC. Everything below is basically editing notes that I may incorporate
-properly later. Not really intended for public consumption but no reason not to
-publish them I guess.)
-
----
-
-
-
-
-
-
-...but I did previously discuss it in depth and I haven't finished writing and
-editing this README yet, so here you go:
-
-## Dynamic solution
-
-If we don't want users to have to specify the config for a type at every point
-the type might be used, one thing we might try is to have a store of
-configuration options. Users can write to it to specify how they want things to
-be rendered, and implementations can read from it to decide how to render
-things, and if all goes well they'll render them how the user wanted.
-
-But we still want different config options for different types. So we have a
-type family like in the simple solution, except here I've called it `ConfigFor`
-to free up the name `Config`.
-
-What we want here is essentially a map from types to `ConfigFor`s. Again
-ignoring the problem with `String`, here's one way we can implement that:
+<details>
+<summary>Implementation for <code>Maybe</code></summary>
 
 ```haskell
-class (Typeable a, Monoid (ConfigFor a), Typeable (ConfigFor a))
-   => Configurable a
- where
-  type ConfigFor a :: Type
+data ConfigMaybe f = ConfigMaybe { showConstructors :: f Bool }
+  deriving stock Generic
+instance Semigroup (ConfigMaybe Last) where
+  a <> b = ConfigMaybe (showConstructors a <> showConstructors b)
+instance Monoid (ConfigMaybe Last) where
+  mempty = ConfigMaybe mempty
 
-data SomeConfigurable where
-  SomeConfigurable :: Configurable a => !(TypeRep a) -> SomeConfigurable
+instance Configurable Maybe where
+  type ConfigFor Maybe f = ConfigMaybe f
+instance Typeable a => Configurable (Maybe a) where
+  type ConfigFor (Maybe a) f = ConfigFor Maybe f
 
-newtype Config =
-  UnsafeConfig { unsafeUnConfig :: Map SomeConfigurable Dynamic }
+instance Gist a => Gist (Maybe a) where
+  type GistLookups (Maybe a) = CL Maybe
+  reifyConfig (ConfigMaybe {..}) =
+    ConfigMaybe (Identity $ fromLast False showConstructors)
+  renderM prec (ConfigMaybe {..}) = if runIdentity showConstructors
+    then \case
+      Nothing -> pure "Nothing"
+      Just x  -> do
+        renderedElem <- subGistPrec 11 Nothing x
+        pure $ parensIfPrecGT 10 prec $ "Just" <+> renderedElem
+    else \case
+      Nothing -> pure "_"
+      Just x  -> subGistPrec prec Nothing x
 
-config :: Configurable a => ConfigFor a -> Config
-configLookup :: Configurable a => Config -> ConfigFor a
-instance Semigroup Config where ...
-instance Monoid Config where ...
-```
+-- Renders "()".
+gist [] $ Just ()
 
-Those last four lines declare an interface to `Config` that lets us use it
-safely. We use `mempty` to create an empty `Config`, `config` to create a
-singleton, `(<>)` to combine two `Config`s, and `configLookup` to read from one.
-
-We then define gisting functions in terms of `Config`,
-
-```haskell
-class Configurable a => Gist a where
-  gistPrec' :: Int -> Config -> a -> Doc ann
-
-gistPrec :: Gist a => Int -> [Config] -> a -> Doc ann
-gistPrec prec confs = gistPrec' prec (mconcat confs)
-
-gist :: Gist a => [Config] -> a -> Doc ann
-gist = gistPrec 0
-```
-
-where `gist` and `gistPrec` are slightly more convenient to call than the actual
-class method.
-
-What does an instance for this look like?
-
-```haskell
-data ConfigList a = ConfigList
-  { showFirst :: Last (Maybe Int)
-  , configElem :: Last Config
-  }
-instance Semigroup (ConfigList a) where ...
-instance Monoid (ConfigList a) where ...
-
-instance Configurable [] where
-  type ConfigFor [] = ConfigList
-
-instance Typeable a => Configurable [a] where
-  type ConfigFor [] = ConfigFor [a]
-
-instance Gist a => Gist [a] where
-  gistPrec' _ conf l =
-    let ConfigList { showFirst, configElem } =
-          configLookup @[] conf <> configLookup [a] conf
-        showFirst_ = fromMaybe Nothing $ getLast showFirst
-        configElem_ = fromMaybe conf $ getLast configElem
-    in  ...
-```
-
-We see here the reason that `Configurable` and `Gist` are now distinct classes.
-The user can configure all lists, and they can override that configuration for
-lists of a specific type. Similarly, we can write `instance Configurable
-Floating`, and the `Gist` instances for both `Float` and `Double` read that
-config value, to allow users to configure both those types at once.
-
-We might use this interface like so:
-
-```haskell
-result = gist [config @[] $ mempty { showFirst = pure (Just 5) }] [True]
-```
-
-If you don't want all instances of a particular type to be configured the same,
-that's still possible (assuming the instance was implemented to allow it). You
-have to use stuff like the `configElem` field:
-
-```haskell
-result = gist
-  [ config @Bool $ mempty { ... }
-  , config @[] $ mempty { configElem = pure $ config @Bool $ mempty { ... }
-  ]
-  (True, [False])
-```
-
-I previously mentioned not liking record updates. So we can allow string
-configuration by adding a parsing method to `Configurable`,
-
-```haskell
-class (Typeable a, Monoid (ConfigFor a), Typeable (ConfigFor a))
-   => Configurable a
- where
-  type ConfigFor a :: Type
-  parseConfigFor :: String -> Either String (ConfigFor a)
-
-strConfig :: forall a . (HasCallStack, Configurable a) => String -> Config
-strConfig s = case parseConfigFor @a s of
-  Left  err     -> error $ "Could not parse config: " <> err
-  Right confFor -> config @a confFor
-
-result = gist [strConfig @[] "show-first 5"] [True]
-```
-
-The nice thing about this is that you don't need to worry about whether the
-record field is imported or where it needs to be imported from. But it's bad in
-so many ways that I'll be surprised if I keep it around.
-
-How does this compare to the simple solution?
-
-I do expect it's simpler in a lot of common use cases. That's valuable. And it's
-probably more likely to keep working, and doing what you want, if you change the
-datatype that you're calling it on.
-
-But there are some complicated cases where it'll be more awkward to get it to do
-what you want. If you do want to configure some instances of a type differently
-from others, you need to fiddle around with things like the `configElem` field
-of `ConfigList`.
-
-As an implementer, it's on you to remember to make such fields available.
-Roughly speaking you *still* need a config field for every field of every
-constructor of your type. And I suspect you're more likely to forget, and
-they're more boilerplate to deal with. On the plus side it's probably going to
-be less of an inconvenience for users if you do forget.
-
-Implementers also need to make a decision for these fields: do the `Config`
-values they contain *replace* the top-level `Config` value or *augment* it? That
-is, suppose I use the configuration
-
-```haskell
-[ config @Foo $ mempty { configA = pure 1 }
-, config @[] $ mempty { configElem = config @Foo $ mempty { configB = pure 1 } }
-]
-```
-
-When rendering a `[Foo]`, we might expect its configuration to be either of
-
-```haskell
-mempty { configB = pure 1 } -- or
-mempty { configA = pure 1, configB = pure 1 }
-```
-
-Which do we choose? That's up to each implementer, and as I write this, I'm not
-sure which I chose myself for the instances I wrote. Maybe I wasn't even
-consistent. I certainly don't expect everyone else to be, which makes a bad
-experience for users.
-
-And suppose that, as a user, you don't understand how your complicated set of
-config options is getting interpreted by instances and turned into the set of
-config values they actually use. What types does an instance call `configLookup`
-for? In what order? You'd better hope instances are well-documented and/or
-(let's face it, and) have source code available.
-
-Also, newtype deriving doesn't get good results. It's not entirely clear to me
-what good results would look like - we might expect the `Gist` instance for
-`newtype MyFloat = MyFloat Float` to pay attention to config values for
-`MyFloat` as well as for `Float`, or perhaps it should be "instead of". But what
-actually happens is it pays attention to config values for `Float` and not
-`MyFloat`, which is certainly wrong. There isn't even a super convenient way to
-piggyback off the existing instance for `Float` if you define the `MyFloat`
-instance manually.
-
-So there's one more approach I have, with a different set of tradeoffs.
-
-## Monadic solution
-
-The idea behind this is similar to the dynamic solution. But we
-
-1. Formalize some of the things that pretty much every instance would have done
-   anyway, and make them official parts of the interface.
-
-2. Track the path of types we've walked to get here, and let users match on that
-   when choosing when their config options apply.
-
-3. Use a Monad to keep track of some state, and potentially give the user some
-   debugging aid.
-
-Probably some of the changes could be picked and chosen, giving various
-different designs in between the Dynamic and Monadic solutions, but I'm not
-going to evaluate them all individually.
-
-
-
-
-
-
-
-
-
-There are lots of ways users might want to customize rendering. The choices
-someone might make when rendering a list (e.g. how many elements to show,
-whether to try to count the remainder) are different from the choices they might
-make when rendering a floating-point number (e.g. padding, number of decimal
-places, whether to use `1e3` syntax). And the choices they might make when
-rendering a custom data type that I've never heard of are different again.
-
-So it won't do to have a fixed configuration type. We'll need a type family to
-specify how each type can be configured.
-
-Given this type family (let's call it `ConfigFor`), we could simply write
-functions `ConfigFor a -> a -> String`. But then if you have a complicated data
-structure, you need to specify the configuration options at every node. If you
-have a `Map Int [Int]` and you want all ints to be printed with
-underscore-separation, you might need something like
-
-```haskell
-defaultMapConfig
-  { keysConfig = defaultIntConfig { separator = '_' }
-  , valsConfig =
-      defaultListConfig { elemsConfig = defaultIntConfig { separator = '_' } }
-  }
-```
-
-or with something lensy it might be
+-- Renders "Just ()".
+gist [configF @Maybe $ \c -> c { showConstructors = pure True }] $ Just ()
 
 ```
-defaultMapConfig
-  & (#keysConfig . #separator .~ '_')
-  & (#valsConfig . #elemsConfig . #separator .~ '_')
-```
 
-These are more verbose than I wanted, though honestly I could believe they're
-better than what I went for. The other problem with them is that a `ConfigFor`
-instance will often need to have a field for every field of every constructor of
-a data type, plus some more; that seems like a lot.
+</details>
 
-Suppose we want something that lets us set config for all the `Int`s at once.
-That sounds like some kind of map from types to `ConfigFor`s. Here's one way we
-can implement that:
-
-```haskell
-class (Typeable a, Monoid (ConfigFor a), Typeable (ConfigFor a))
-   => Configurable a
- where
-  type ConfigFor a :: Type
-
-data SomeConfigurable where
-  SomeConfigurable :: Configurable a => !(TypeRep a) -> SomeConfigurable
-
-newtype Config =
-  UnsafeConfig { unsafeUnConfig :: Map SomeConfigurable Dyn.Dynamic }
-
-configInsert :: Configurable a => ConfigFor a -> Config -> Config
-configLookup :: Configurable a => Config -> ConfigFor a
-instance Semigroup Config where { {- ... -} }
-instance Monoid Config where { {- ... -} }
-```
-
-As long as we only interact with `Config` using `configInsert`, `configLookup`
-and the `Monoid` and `Semigroup` instances, it works fine.
-
-Now we can make a class for converting things to strings:
-
-```haskell
-class Configurable a => Gist a where
-  gist :: Config -> a -> String
-```
-
-Except that for various reasons, it's more like
-
-```haskell
-class Configurable a => Gist a where
-  gistPrec' :: Int -> Config -> a -> Doc ann
-```
-
-This is still a simplification, but the actual class just adds to it, it doesn't
-change anything.
-
-The reason that `Configurable` and `Gist` are two different classes, is that it
-lets us attach configuration to non-data types; that is, types of kind other
-than `Type`. For example, we can configure `[]` or `Maybe` or `Floating`. Then
-`Gist` instances can look up configuration for those types, when it seems
-relevant. If the instances for `Float` and `Double` both look at the
-configuration for `Floating` as well as their own configuration, then users can
-configure both simultaneously.
-
-The reason for the `Int` is the same as in the standard `showsPrec`. It lets
-instances decide whether or not to include parentheses depending on context. In
-theory that information could be put into the `Config`, but currently it's not.
-
-And
-`[Doc](https://hackage.haskell.org/package/prettyprinter-1.7.1/docs/Prettyprinter.html#t:Doc)`
-is from `prettyprinter`. It lets us handle the actual pretty-printing, in a way
-that `String` simply can't.
-
-## Usage
-
-If you simply want to use `pretty-gist`, the intended set of imports is
+<details>
+<summary>Implementation for <code>GameState</code></summary>
 
 ```haskell
 import qualified Gist
-import Gist (gist)
+import           Gist ( Configurable(..), Gist(..), fromLast )
+import qualified Gist as Gist.ConfigMaybe ( ConfigMaybe(..) )
+
+deriving via Gist.Showily Player instance Configurable Player
+deriving via Gist.Showily Player instance Gist Player
+
+deriving via Gist.Showily PieceType instance Configurable PieceType
+deriving via Gist.Showily PieceType instance Gist PieceType
+
+-- We can't derive an instance `Configurable Board`. We have that `Board a` is
+-- representation-equivalent to `[[a]]`, but `Board` itself isn't
+-- representation-equivalent to anything. Anyway, even if we had an instance,
+-- the instance we're deriving for `Gist (Board a)` wouldn't look at it.
+deriving newtype instance Typeable a => Configurable (Board a)
+deriving newtype instance Gist a => Gist (Board a)
+
+data ConfigPiece f = ConfigPiece { singleChar :: f Bool }
+  deriving stock Generic
+instance Semigroup (ConfigPiece Last) where
+  (ConfigPiece a1) <> (ConfigPiece a2) = ConfigPiece (a1 <> a2)
+instance Monoid (ConfigPiece Last) where
+  mempty = ConfigPiece mempty
+
+instance Configurable Piece where
+  type ConfigFor Piece f = ConfigPiece f
+
+instance Gist Piece where
+  type GistLookups Piece = ()
+  reifyConfig (ConfigPiece a) = ConfigPiece (Identity $ fromLast False a)
+  renderM prec (ConfigPiece {..}) piece@(Piece {..}) =
+    if runIdentity singleChar
+      then pure $ prettyPieceChar piece
+      else Gist.record
+        prec
+        (Just "Piece")
+        [ ("pieceType", Gist.subGist (Just "pieceType") pieceType)
+        , ("owner"    , Gist.subGist (Just "owner") owner)
+        , ("lastMoved", Gist.subGist (Just "lastMoved") lastMoved)
+        ]
+
+instance Configurable GameState where
+  type ConfigFor GameState f = Proxy f
+
+instance Gist GameState where
+  type GistLookups GameState = ()
+  reifyConfig _ = Proxy
+  renderM prec _ (GameState {..}) =
+    Gist.localPushConf
+        (Gist.configF @Piece $ \c -> c { singleChar = pure True })
+      $ Gist.record
+          prec
+          (Just "GameState")
+          [ ("turn"     , Gist.subGist (Just "turn") turn)
+          , ("pBlackWin", Gist.subGist (Just "pBlackWin") pBlackWin)
+          , ("pWhiteWin", Gist.subGist (Just "pWhiteWin") pWhiteWin)
+          , ("nMoves"   , Gist.subGist (Just "nMoves") nMoves)
+          , ("board"    , Gist.subGist (Just "board") board)
+          ]
+
+-- Renders in short form.
+gist [] startPos
+
+-- Renders in long form. generic-lens could replace the record update, one of:
+--     configF @Piece $ setField @"singleChar" $ pure False
+--     configF @Piece $ field @"singleChar" .~ pure False
+gist [Gist.configF @Piece $ \c -> c { singleChar = pure False }]
+     startPos
+
+-- Renders in fully explicit form. generic-lens would work here too, avoiding
+-- the horrible import.
+gist
+  [ Gist.configF @Piece $ \c -> c { singleChar = pure False }
+  , Gist.configF @Maybe
+      $ \c -> c { Gist.ConfigMaybe.showConstructors = pure True }
+  ]
+  startPos
 ```
 
-If the default gist style for your data type is acceptable, then `gist [] val`
-is sufficient. For example:
+</details>
+
+## Commentary
+
+I've given three different renders for all of these `GameState` examples. "Short
+form" looks like the example I gave above, except I haven't configured the
+floats to show as percentages. (Like I said, not yet implemented.) "Fully
+explicit form" is similar to the pretty-simple rendering, except with a
+different indent style. And "long form" is in between, with abbreviated
+rendering for `Maybe` but everything else displayed in full - there's no
+ambiguity here, so it seems like a good choice even if you don't want any data
+missing.
+
+In this particular case, rendering `GameState` for the classless and one-class
+solutions are about as verbose as each other. I think that's kind of a
+coincidence based on where the type variables are and what we're doing with
+them. For example, `GameState` has no type variables, so its renderers can be
+passed in `ConfigGameState`, letting them be defaulted. `Board` has a type
+variable, but `renderBoard` has no other config options; so there are no cases
+where with one-class we can say "change this option for how we render `Board`,
+but leave the sub-renderer alone", but with classless we can only say "change
+this option for how we render `Board`, and while we're at it here's the
+sub-renderer to use". This kind of thing does come up once, when in the
+fully-explicit form we want to set `showConstructors` on the `lastMoved`
+renderer, and have to also repeat the renderer for the `Int`. But in that case
+the renderer is just `gistShowily` so it doesn't hurt much.
+
+I expect there'd be more difference in other cases. But maybe I'm wrong? Who
+knows.
+
+A thing I dislike in all of them, is how I've had to do imports to handle record
+field updates. As of (I think) GHC 9.2, record updates combined with
+`DuplicateRecordFields` is [more
+awkward](https://www.reddit.com/r/haskell/comments/134c1kt/monthly_hask_anything_may_2023/jljjjhp/)
+than it used to be, at least if you don't want to get warnings about future
+compatibility. So when I do the awful
 
 ```haskell
-gist [] (3 :: Int) -- -> "3"
-gist [] ()         -- -> "()"
+import qualified Gist as Gist.ConfigMaybe ( ConfigMaybe(..) )
 ```
 
-But if you want to customize rendering, you can use the functions `Gist.config`
-and `Gist.strConfig`. For example:
-
-```haskell
-gist [Gist.strConfig @Float "%.2f"] (1.2345 :: Float) -- -> "1.23"
-```
-
-`Gist.config` requires you to know the configuration type for a given type. This
-is handled by the type family `ConfigFor` in the class `Gist.Configurable`.
-`Gist.strConfig` doesn't need that, but does need you to know how to specify its
-configuration in string form. (If you make a mistake, that's a runtime error.)
-Neither of these is ideal.
-
-For example, `ConfigFor Float ~ Last (Maybe Printf.FieldFormat)`. `FieldFormat`
-is the type that `Text.Printf` uses to control rendering; in future I expect to
-replace it with something more expressive. (E.g. it has no way to render numbers
-as `123_456` or `123,456`.) The `Maybe` is because we want some way to return to
-the default rendering. And `Last` is because every `ConfigFor` instance has to
-be a `Monoid` in case we try to configure the same thing twice. Currently every
-instance is a product of `Last`s, and I'm not sure there's any reason for them
-to be anything else.
-
-`strConfig` kinda sucks, it's super not Haskelly. But it can be more succinct
-than `Config`, and reduces the number of things you might need to import. I'm
-inclined to recommend that you basically only use it temporarily while
-debugging, plus for things like %-formatting which are already commonly
-implemented through string parsing. But I guess we'll see how things land.
-
-The first argument to `gist` is a list of all configurations you want to apply
-to any type, and they get applied wherever the type appears in the value being
-rendered.
-
-## Records
-
-In general it would be nice to use records to configure things. But Haskell's
-record story is not great.
-
-For lots of data structures we might want the option to only show the beginning.
-In current implementations I've called it "show first", but "truncate at" might
-be another sensible choice. We could imagine applying this to list, maps, sets,
-strings, etc.. And then we could also have a "count remaining" option so the
-user can see how many elements were omitted.
-
-So do the records we use to configure this type, all have fields `truncateAt ::
-Maybe Int, countRemaining :: Bool`? Certainly we'd like users to be able to
-guess what these options are called, supposing an instance has them.
-
-I don't think duplicate record fields work very well right now. (It's possible
-they've improved recently.) But I'm also not enthusiastic about prefixing every
-field in every config type.
-
-A second problem with records is importing.
-
-It may be that these problems are solved by anonymous records. But that seems
-like a very large hammer, and increases dependency footprints.
-
-Using generic-lens and/or generic-optics might also be fine as a solution. Users
-who don't want to rely on those could still do the awkward workarounds.
-
-## Comparison
-
-### Simplicity
-
-Unsurprisingly, the Simple interface is easiest to understand, which seems
-valuable. It works by construction, with invalid types being unrepresentable.
-The other interfaces are less transparent, and use types that could hold invalid
-values if I wrote a bug. Additionally, the monadic interface relies on
-higher-kinded data.
-
-### Ease of use
-
-To a large extent this is an open question, and I don't think there's going to
-be an easy answer to it.
-
-### Ease of implementation
-
-That is, how easy is it to write an instance?
-
-### Overridability
-
-That is, if an instance doesn't exist, or doesn't do quite what you want, can
-you as a user do something about it?
-
-The Simple interface wins here: if you don't like the `Gist` instance for a
-type, you can simply write your own renderer and use that.
-
-```haskell
-gist (defaultConfig & #gistElem .~ FnGister (\() -> "_")) [()] -- "[_]"
-```
-
-This even works if the type doesn't have its own instance. A caveat is there's
-then no `defaultConfig`, but you can just use a different `defaultConfig` and
-change the type afterwards:
-
-```haskell
-gist (defaultConfig @[Void]
-      & #gistElem
-      .~ FnGister (\f -> gist defaultConfig $ f ()))
-     [\() -> 3] -- "[3]"
-```
-
-(TODO: do these work? The first one might also need its type specified.)
-
-I think I'd be able to make the "write your own renderer" thing work for the
-other interfaces. At any rate, any individual instance can have as an option
-"use some custom renderer instead of the one specified here". So I could hard
-code that as a config option to every instance, and if I play my cards right it
-might not even inconvenience implementers.
-
-But you'd only be able to override existing instances like that. You wouldn't be
-able to ignore the lack of an instance, and I don't see a way to make that
-possible. In the simple interface, it's possible to create a value of type
-`Config [() -> Int]` even though there's no `instance Gist (() -> Int)`; and
-that value is enough to gist a value of type `[() -> Int]`.
-
-But in the other interfaces, to gist a value of type `[a]`, the configuration
-type is simply `Config`. We may know that the `Config` includes instructions for
-rendering `a` that have nothing to do with the `Gist a` instance; but the
-compiler doesn't know that. Maybe it's possible if you somehow attach a
-type-level list to the `Config` saying which instances are unnecessary, but that
-sounds unergonomic.
-
-## Open questions
-
-### How well do records work for this?
-
-It seems natural to use records for config types, but Haskell's records are
-kinda crufty. (And so is Haskell's import syntax, and so is the interaction
-between the two.)
-
-I'd prefer to be able to do updates without either explicitly importing a record
-field or qualifying it. That is, I don't like either of
-
-```haskell
-import Some.Data.Type (GistConfig(..))
-result = gist (defaultConfig { someOption = 3 }) val
-
-import qualified Some.Data.Type as Type
-result = gist (defaultConfig { Type.someOption = 3 }) val
-```
-
-Both have the problem that you need to know where the `Gist` instance for a type
-is defined. If it's defined next to the type itself, you'll typically find its
-configuration type in the same module. (But maybe not, if it borrows another
-type's config and doesn't re-export it.) If it's defined next to the `Gist`
-class, you'll find its configuration type in the `Gist` module.
-
-It's probably not that big a deal. Still, I'd prefer users not to have to worry
-about this. [Anonymous
-records](https://hackage.haskell.org/package/large-anon-0.2/docs/Data-Record-Anon-Simple.html)
-might be one solution, downside is that package has a lot of dependencies but
-upside is they might be useful for other reasons, see next section. I haven't
-investigated them closely. [Generic lenses]() (or [generic optics]()) might be
-another, which would only affect
-
-Possible awkward: consider something like
-
-```haskell
-data Pair a = Pair { p1 :: a, p2 :: a }
-data ConfigPair a = ConfigPair { gistP1 :: Gister a, gistP2 :: Gister a }
-instance Gist (Pair a) where { type Config (Pair a) = ConfigPair a; ... }
-
-val :: Pair (() -> Int)
-```
-
-Suppose we want to gist `val`. As a record upate, and using lenses, the configs
-look like:
-
-```haskell
-defaultConfig @(Pair Void) { gistP1 = FnGister (...), gistP2 = FnGister (...) }
-
-defaultConfig @(Pair Void)
-  & #gistP1 .~ FnGister (...)
-  & #gistP2 .~ FnGister (...)
-```
-
-But the second doesn't type check, because after the first update `gistP1` and
-`gistP2` have different types. From a quick glance at the docs I'm not even sure
-large-anon supports type-changing record updates; if it does it may or may not
-have the same problem.
-
-Possible solution: we actually have
-
-```haskell
-data ConfigPair a b = ConfigPair { gistP1 :: Gister a, gistP2 :: Gister b }
-instance Gist (Pair a) where { type Config (Pair a) = ConfigPair a a; ... }
-```
-
-Some of these problems partially go away if we allow using strings for config.
-But not all the way, and my guess is the cure is worse than the disease.
-
-### Can we make `DerivingVia` or `DeriveAnyClass` work?
-
-A sensible default for a product type is likely "render similar to how the
-`Show` instance would, but have a config option for each of your fields". Can we
-make that work through a `Generic` instance?
-
-This probably needs anonymous records. I can't think how else to do it.
-
-Better yet would be if we can have a custom instance write a record, and say
-"include in this record the config options that would have been generated
-generically". (Ideally as a subrecord, not a record-valued field.)
-
-If we can't make these work, I suppose template Haskell is an option. I'm not
-sure how annoying it would be. Also, it could conceivably be possible to derive
-the implementation for the `gistPrec` function generically, if the user defines
-the `Config` type in a specific way.
-
-### Does the PVP cause us problems?
-
-
-### What is this library trying to be?
-
-Do I expect users to be able to use it to get the renders they want, down to the
-character (and adjusting correctly for width)? That feels too ambitious. But
-then how much control do I want them to have? Should they be able to choose
-between various different layout options and indent widths? Honestly, probably
-*also* too ambitious.
-
-Some places this library might get used:
-
-1. Debugging output that never gets committed
-2. Test output that sticks around but is never seen by users
-3. Debug output that might get seen by users, but only when things go wrong
-4. Ouptut that's fully intended and expected to be seen by users in the normal
-   course of events
-
-If we can do one we can do any of the previous ones, but focusing on an earlier
-number might make it easier to use for that purpose?
-
-### What would be helpful
-
-I don't actually have a lot of case studies in my head. Most of the places I've
-wanted something like this have been at work, and I can't share that code and
-it's too complicated to be a good case study. Haskenthetical is more promising.
-But if readers can think of times they would have found something like this
-useful, I'd love to know about it, especially if there are details that might
-influence the design.
-
-
-
-
-
-
-The Simple interface is easiest to understand, which seems valuable. It supports
-containers of non-gistable things. (You can gist e.g. `[(+ 1), (* 2)]`, though
-there's no default config for that.) It also gives you full control over
-rendering of gistable things, if the existing instance doesn't do what you want.
-
-One downside is verbosity in use. There's no way to say "yes, every Float should
-be rendered like...", you just need to point at every Float in your data
-structure. How big a deal is this? Depends on common use cases. If it turns out
-to be a problem, it may be possible to take ideas from one of the other
-implementations, and use them to generate a config for this implementation.
-
-Another is that it's easier to write a badly-behaved instance. If you simply
-don't include subconfigs for some part of your data, users won't be able to
-configure it. How big a deal is this? Partly depends what quality of generic
-implementation I can reach.
-
-There's no configuration by string. I want users to be able to make changes
-without fiddling with imports. I think that something like
-
-```haskell
-import Gist (gist)
-result = gist (defaultConfig { showFirst = Just 2 }) [...]
-```
-
-doesn't work, and perhaps can't be made to, because of scoping; though it may be
-that `HasField` related stuff will change that in future? Even if we don't mind
-the imports, duplicate record fields might make things very awkward. Meanwhile,
-I'm confident that
-
-```haskell
-import Gist (gist)
-result = gist (defaultConfig & #showFirst .~ Just 2) [...]
-```
-
-can be made to work, but maybe only if the user relies on generic-lens or
-generic-optics.
+that's so I can do `val { Gist.ConfigMaybe.showConstructors = ... }` to update
+the field. Another option is to use
+[generic-lens](https://hackage.haskell.org/package/generic-lens) or
+[generic-optics](https://hackage.haskell.org/package/generic-optics) to do
+updates, which I've also demonstrated in some cases. My guess is that would be
+fine in a lot of application code, but many libraries won't want to depend on
+them.
+
+I could also try to choose constructor names not to conflict. But I think that
+basically means prefixing them all, which would also be super verbose, and it
+would annoy users of the generic libraries.
+
+(Given what I've implemented so far, the name conflicts only actually exist in
+the one-class solution, which reuses the name `gistElem`. But I expect
+`showConstructors` and `showFirst` to also get reused, e.g. for gisting `Either`
+and `Set`; and something like `countRemaining` could be useful for collections
+that get truncated, and so on. So it seemed more useful to write things this
+way.)
+
+I haven't looked closely, but [anonymous
+records](https://hackage.haskell.org/package/large-anon-0.2/docs/Data-Record-Anon.html)
+might help here. They also might help with `Generic`-based defaulting, which is
+another thing I haven't looked into. But they seem like a large hammer that
+increases dependency footprints. And from a quick look I'm not sure they support
+type-changing record updates.
+
+I'd prefer if there wasn't a single fixed indent style. But I'm not sure what to
+do about it. Conceivably, I could have a fixed `IndentStyle` type, and expect
+implementers to pay attention to it. (Similar to how precedence has been granted
+special status.) But I expect if I do that, there'll be situations where people
+wish the type was larger (because it doesn't support things they want), and
+others where they wish it was smaller (because implementing support for all the
+options is a pain). If I make it maximally small, we only have one of those
+problems. Similar thoughts on possible color support.
+
+## Questions for you
+
+One reason I wrote all this is to try to gauge enthusiasm. One possible future
+for pretty-gist is that I use it a small amount and in personal projects and at
+my job, and basically no one else uses it at all. That would be fine.
+
+Another possible future is that it becomes a package that other people do use
+and that I take
+[responsibility](https://reasonableapproximation.net/2020/04/13/in-my-culture-responsibility-oss.html)
+for. But that's only going to happen if it seems like anyone cares.
+
+So some things I'd like to know from readers:
+
+* How cool do you think each version is?
+* How likely are you to use each version?
+* How annoyed would you be, for each version, if you felt obligated to implement
+  support for it for a library you maintain or similar?
+* Which version do you think is coolest / are you most likely to use / least
+  likely to be annoyed by?
+* Do any of them seem to have major advantages or disadvantages I missed?
+* What would you use them for?
+* Can you think of other approaches to solving this problem that you think you
+  might like better than any of these?
+
+I have some opinions on these myself, but I'd prefer to wait and see what others
+say before revealing. I also have another possible approach vaguely in mind; but
+if I waited to explore it before publishing, then this would never get finished.

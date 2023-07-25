@@ -6,7 +6,6 @@ module Gist.Classless
   , ConfigMaybe(..)
   , defaultConfigMaybe
   , gistMaybe
-  , defaultConfigPrintf
   , gistPrintfily
   , gistShowily
   , parensIf
@@ -57,17 +56,13 @@ gistMaybe (ConfigMaybe {..}) renderElem prec = if showConstructors
     Just a  -> renderElem prec a
 
 data ConfigPrintf = ConfigPrintf
-  { printfFmt :: Maybe String
+  { printfFmt :: String
   }
   deriving stock Generic
 
-defaultConfigPrintf :: ConfigPrintf
-defaultConfigPrintf = ConfigPrintf { printfFmt = Nothing }
-
-gistPrintfily :: (Show a, Printf.PrintfArg a) => ConfigPrintf -> a -> Doc ann
-gistPrintfily (ConfigPrintf {..}) a = case printfFmt of
-  Nothing  -> viaShow a
-  Just fmt -> pretty (Printf.printf fmt a :: String)
+gistPrintfily :: Printf.PrintfArg a => ConfigPrintf -> Prec -> a -> Doc ann
+gistPrintfily (ConfigPrintf {..}) _ a =
+  pretty (Printf.printf printfFmt a :: String)
 
 gistShowily :: Show a => Prec -> a -> Doc ann
 gistShowily (Prec prec) a = pretty $ showsPrec prec a ""

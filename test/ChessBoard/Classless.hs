@@ -20,9 +20,7 @@ defaultConfigPiece = ConfigPiece
   { singleChar      = False
   , renderPieceType = Gist.gistShowily
   , renderOwner     = Gist.gistShowily
-  , renderLastMoved = Gist.gistMaybe
-                        Gist.defaultConfigMaybe
-                        (const $ Gist.gistPrintfily Gist.defaultConfigPrintf)
+  , renderLastMoved = Gist.gistMaybe Gist.defaultConfigMaybe Gist.gistShowily
   }
 
 gistPiece :: ConfigPiece -> Prec -> Piece -> Doc ann
@@ -50,9 +48,9 @@ data ConfigGameState = ConfigGameState
 defaultConfigGameState :: ConfigGameState
 defaultConfigGameState = ConfigGameState
   { renderTurn      = Gist.gistShowily
-  , renderPBlackWin = const $ Gist.gistPrintfily Gist.defaultConfigPrintf
-  , renderPWhiteWin = const $ Gist.gistPrintfily Gist.defaultConfigPrintf
-  , renderNMoves    = const $ Gist.gistPrintfily Gist.defaultConfigPrintf
+  , renderPBlackWin = Gist.gistShowily
+  , renderPWhiteWin = Gist.gistShowily
+  , renderNMoves    = Gist.gistShowily
   , renderBoard     = gistBoard
                       $ Gist.gistList Gist.defaultConfigList
                       $ Gist.gistList Gist.defaultConfigList

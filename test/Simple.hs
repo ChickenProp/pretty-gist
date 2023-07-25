@@ -207,6 +207,50 @@ spec = do
           CB.startPos
         `shouldBe` CB.renderedLong
 
+    numberedTest $ do
+      gistF80
+          ( setField @"gistBoard"
+          $ Gist.defaultConfGisterF
+          $ setField @"gistElem"
+          $ Gist.defaultConfGisterF
+          $ setField @"gistElem"
+          $ Gist.defaultConfGisterF
+          $ ( setField @"showConstructors" True
+            . ( setField @"gistElem"
+              $ Gist.defaultConfGisterF
+              $ ( setField @"singleChar" False
+                . ( setField @"gistLastMoved"
+                  $ Gist.defaultConfGisterF
+                  $ setField @"showConstructors" True
+                  )
+                )
+              )
+            )
+          )
+          CB.startPos
+        `shouldBe` CB.renderedFull
+
+    numberedTest $ do
+      gistF80
+          (let
+             gLastMoved = Gist.defaultConfGisterF
+               $ \c -> c { Gist.ConfigMaybe.showConstructors = True }
+             gPiece = Gist.defaultConfGisterF $ \c ->
+               c { CB.singleChar = False, CB.gistLastMoved = gLastMoved }
+             gMPiece = Gist.defaultConfGisterF $ \c -> c
+               { Gist.ConfigMaybe.gistElem         = gPiece
+               , Gist.ConfigMaybe.showConstructors = True
+               }
+             gLMPiece = Gist.defaultConfGisterF
+               $ \c -> c { Gist.ConfigList.gistElem = gMPiece }
+             gBoard = Gist.defaultConfGisterF
+               $ \c -> c { Gist.ConfigList.gistElem = gLMPiece }
+           in
+             \c -> c { CB.gistBoard = gBoard }
+          )
+          CB.startPos
+        `shouldBe` CB.renderedFull
+
 -- | It's a hassle to come up with descriptive test names, but convenient for
 -- them all to be unique. This lets us give them numbers. We can't search for
 -- the test name in source if something fails, but the failure message has a

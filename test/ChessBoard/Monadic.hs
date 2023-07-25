@@ -12,21 +12,22 @@ import           Data.Proxy                     ( Proxy(..) )
 import           Data.Typeable                  ( Typeable )
 import           GHC.Generics                   ( Generic )
 import qualified Gist.Monadic                  as Gist
-import           Gist.Monadic                   ( Gist(..)
+import           Gist.Monadic                   ( Configurable(..)
+                                                , Gist(..)
                                                 , fromLast
                                                 )
 
-deriving via Gist.Showily Player instance Gist.Configurable Player
+deriving via Gist.Showily Player instance Configurable Player
 deriving via Gist.Showily Player instance Gist Player
 
-deriving via Gist.Showily PieceType instance Gist.Configurable PieceType
+deriving via Gist.Showily PieceType instance Configurable PieceType
 deriving via Gist.Showily PieceType instance Gist PieceType
 
--- Can't derive an instance for `Board`. We have that `Board a` is
+-- We can't derive an instance `Configurable Board`. We have that `Board a` is
 -- representation-equivalent to `[[a]]`, but `Board` itself isn't
 -- representation-equivalent to anything. Anyway, even if we had an instance,
--- the instance we've derived for `Gist (Board a)` wouldn't look at it.
-deriving newtype instance Typeable a => Gist.Configurable (Board a)
+-- the instance we're deriving for `Gist (Board a)` wouldn't look at it.
+deriving newtype instance Typeable a => Configurable (Board a)
 deriving newtype instance Gist a => Gist (Board a)
 
 data ConfigPiece f = ConfigPiece
@@ -38,11 +39,11 @@ instance Semigroup (ConfigPiece Last) where
 instance Monoid (ConfigPiece Last) where
   mempty = ConfigPiece mempty
 
-instance Gist.Configurable Piece where
+instance Configurable Piece where
   type ConfigFor Piece f = ConfigPiece f
 
 instance Gist Piece where
-  type GistPathComponents Piece = ()
+  type GistLookups Piece = ()
   reifyConfig (ConfigPiece a) = ConfigPiece (Identity $ fromLast False a)
   renderM prec (ConfigPiece {..}) piece@(Piece {..}) =
     if runIdentity singleChar
@@ -55,11 +56,11 @@ instance Gist Piece where
         , ("lastMoved", Gist.subGist (Just "lastMoved") lastMoved)
         ]
 
-instance Gist.Configurable GameState where
+instance Configurable GameState where
   type ConfigFor GameState f = Proxy f
 
 instance Gist GameState where
-  type GistPathComponents GameState = ()
+  type GistLookups GameState = ()
   reifyConfig _ = Proxy
   renderM prec _ (GameState {..}) =
     Gist.localPushConf

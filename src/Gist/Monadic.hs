@@ -105,9 +105,9 @@ matchPath path = \case
       FCAny1N -> match1 <|> matchN
      where
       -- this fuzzy component consumes...
-      match0 = go ((p1, mc) : ps) fs      -- no path components
-      match1 = go ps fs             -- one path component
-      matchN = go ps (FCAny0N : fs) -- one or more path components
+      match0 = go ((p1, mc) : ps) fs -- no path components
+      match1 = go ps fs              -- one path component
+      matchN = go ps (FCAny0N : fs)  -- one or more path components
 
 -- brittany doesn't handle GADT syntax for this.
 data SomeConfigurable = forall a . Configurable a => SomeConfigurable
@@ -283,11 +283,11 @@ instance
 -- we also need them in 'gist', 'gistPrec', the context of the @[a]@ instance...
 class
   ( Configurable a
-  , Configurables (GistPathComponents a)
-  , CanDoLookups (GistPathComponents a) (ConfigFor a Last)
+  , Configurables (GistLookups a)
+  , CanDoLookups (GistLookups a) (ConfigFor a Last)
   ) => Gist a
  where
-  type GistPathComponents a
+  type GistLookups a
   reifyConfig :: ConfigFor a Last -> ConfigFor a Identity
   renderM :: MonadGist m => Int -> ConfigFor a Identity -> a -> m (Doc ann)
 
@@ -303,10 +303,10 @@ subGistPrec prec mComponent val = do
   conf <- gistConf
   let thisConf =
         reifyConfig @a
-          $ configLookups @(GistPathComponents a) path conf
+          $ configLookups @(GistLookups a) path conf
           $ configLookup @a path conf
   localPushPath
-      (toPathComponents @(GistPathComponents a) $ someTypeRep (Proxy @a) :| [])
+      (toPathComponents @(GistLookups a) $ someTypeRep (Proxy @a) :| [])
       mComponent
     $ renderM prec thisConf val
 
@@ -326,7 +326,7 @@ newtype Showily a = Showily a
 instance Typeable a => Configurable (Showily a) where
   type ConfigFor (Showily a) f = Proxy f
 instance (Show a, Typeable a) => Gist (Showily a) where
-  type GistPathComponents (Showily a) = ()
+  type GistLookups (Showily a) = ()
   reifyConfig _ = Proxy
   renderM prec _ (Showily a) = pure $ PP.pretty $ showsPrec prec a ""
 
@@ -334,7 +334,7 @@ instance Configurable () where
   type ConfigFor () f = Proxy f
 
 instance Gist () where
-  type GistPathComponents () = ()
+  type GistLookups () = ()
   reifyConfig _ = Proxy
   renderM _ _ _ = pure "()"
 
@@ -361,7 +361,7 @@ instance Configurable Int where
   type ConfigFor Int f = ConfigPrintf f
 
 instance Gist Int where
-  type GistPathComponents Int = ()
+  type GistLookups Int = ()
   reifyConfig = reifyConfigPrintf
   renderM _ conf x = pure $ renderPrintf conf x
 
@@ -372,7 +372,7 @@ instance Configurable Float where
   type ConfigFor Float f = ConfigFor Floating f
 
 instance Gist Float where
-  type GistPathComponents Float = CL Floating
+  type GistLookups Float = CL Floating
   reifyConfig = reifyConfigPrintf
   renderM _ conf x = pure $ renderPrintf conf x
 
@@ -380,7 +380,7 @@ instance Configurable Double where
   type ConfigFor Double f = ConfigFor Floating f
 
 instance Gist Double where
-  type GistPathComponents Double = CL Floating
+  type GistLookups Double = CL Floating
   reifyConfig = reifyConfigPrintf
   renderM _ conf x = pure $ renderPrintf conf x
 
@@ -397,22 +397,13 @@ instance Semigroup (ConfigMaybe Last) where
 instance Monoid (ConfigMaybe Last) where
   mempty = ConfigMaybe mempty
 
-data ConfigList f = ConfigList
-  { showFirst :: f (Maybe Int)
-  }
-  deriving stock Generic
-instance Semigroup (ConfigList Last) where
-  a <> b = ConfigList (showFirst a <> showFirst b)
-instance Monoid (ConfigList Last) where
-  mempty = ConfigList mempty
-
 instance Configurable Maybe where
   type ConfigFor Maybe f = ConfigMaybe f
 instance Typeable a => Configurable (Maybe a) where
   type ConfigFor (Maybe a) f = ConfigFor Maybe f
 
 instance Gist a => Gist (Maybe a) where
-  type GistPathComponents (Maybe a) = CL Maybe
+  type GistLookups (Maybe a) = CL Maybe
   reifyConfig (ConfigMaybe {..}) =
     ConfigMaybe (Identity $ fromLast False showConstructors)
   renderM prec (ConfigMaybe {..}) = if runIdentity showConstructors
@@ -425,6 +416,15 @@ instance Gist a => Gist (Maybe a) where
       Nothing -> pure "_"
       Just x  -> subGistPrec prec Nothing x
 
+data ConfigList f = ConfigList
+  { showFirst :: f (Maybe Int)
+  }
+  deriving stock Generic
+instance Semigroup (ConfigList Last) where
+  a <> b = ConfigList (showFirst a <> showFirst b)
+instance Monoid (ConfigList Last) where
+  mempty = ConfigList mempty
+
 instance Configurable [] where
   type ConfigFor [] f = ConfigList f
 
@@ -432,7 +432,7 @@ instance Typeable a => Configurable [a] where
   type ConfigFor [a] f = ConfigFor [] f
 
 instance Gist a => Gist [a] where
-  type GistPathComponents [a] = CL []
+  type GistLookups [a] = CL []
   reifyConfig ConfigList {..} =
     ConfigList (Identity $ fromLast Nothing showFirst)
   renderM _ (ConfigList {..}) xs = do
@@ -453,7 +453,7 @@ instance (Typeable a, Typeable b) => Configurable (a, b) where
   type ConfigFor (a, b) f = ConfigFor ((,) a) f
 
 instance (Gist a, Gist b) => Gist (a, b) where
-  type GistPathComponents (a, b) = CL (,) :& ((,) a)
+  type GistLookups (a, b) = CL (,) :& ((,) a)
   reifyConfig _ = Proxy
   renderM _ _ (a, b) =
     PP.tupled <$> sequence [subGist (Just "fst") a, subGist (Just "snd") b]

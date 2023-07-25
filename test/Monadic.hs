@@ -250,6 +250,14 @@ spec = do
              CB.startPos
         `shouldBe` CB.renderedLong
 
+    numberedTest $ do
+      gist80
+          [ Gist.configF @CB.Piece $ field @"singleChar" .~ pure False
+          , Gist.configF @Maybe $ field @"showConstructors" .~ pure True
+          ]
+          CB.startPos
+        `shouldBe` CB.renderedFull
+
 -- | It's a hassle to come up with descriptive test names, but convenient for
 -- them all to be unique. This lets us give them numbers. We can't search for
 -- the test name in source if something fails, but the failure message has a

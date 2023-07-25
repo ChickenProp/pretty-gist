@@ -10,6 +10,8 @@ import           Test.Hspec.Expectations
 
 import qualified ChessBoard.Classless          as CB
 import qualified Gist.Classless                as Gist
+import qualified Gist.Classless                as Gist.ConfigMaybe
+                                                ( ConfigMaybe(..) )
 
 spec :: Hspec.Spec
 spec = do
@@ -31,3 +33,21 @@ spec = do
                              $ CB.defaultConfigPiece { CB.singleChar = False }
           }
     layout 80 (CB.gistGameState conf 0 CB.startPos) `shouldBe` CB.renderedLong
+
+  it "Full" $ do
+    let confMaybe =
+          Gist.defaultConfigMaybe { Gist.ConfigMaybe.showConstructors = True }
+        conf = CB.defaultConfigGameState
+          { CB.renderBoard = CB.gistBoard
+                             $ Gist.gistList Gist.defaultConfigList
+                             $ Gist.gistList Gist.defaultConfigList
+                             $ Gist.gistMaybe confMaybe
+                             $ CB.gistPiece
+                             $ CB.defaultConfigPiece
+                                 { CB.singleChar      = False
+                                 , CB.renderLastMoved = Gist.gistMaybe
+                                                          confMaybe
+                                                          Gist.gistShowily
+                                 }
+          }
+    layout 80 (CB.gistGameState conf 0 CB.startPos) `shouldBe` CB.renderedFull
