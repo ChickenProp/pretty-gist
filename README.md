@@ -1,4 +1,6 @@
-(This README is incomplete.)
+*I gave a [fifteen minute talk](https://www.youtube.com/watch?v=TBBHGR4ZlZM)
+about this at Zurihac 2023. If you read this document, I don't think there's
+much point in additionally watching the video.*
 
 This is an exploration of a new-to-me approach to stringification.
 
