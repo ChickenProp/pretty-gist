@@ -1,17 +1,17 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module ChessBoard.Simple
+module ChessBoard.OneClass
   ( module ChessBoard
-  , module ChessBoard.Simple
+  , module ChessBoard.OneClass
   ) where
 
 import           ChessBoard
 import           GHC.Generics                   ( Generic )
-import qualified Gist.Simple                   as Gist
-import           Gist.Simple                    ( Gist(..) )
-import qualified Gist.Simple                   as Gist.ConfigList
+import qualified Gist.OneClass                 as Gist
+import           Gist.OneClass                  ( Gist(..) )
+import qualified Gist.OneClass                 as Gist.ConfigList
                                                 ( ConfigList(..) )
-import qualified Gist.Simple                   as Gist.ConfigMaybe
+import qualified Gist.OneClass                 as Gist.ConfigMaybe
                                                 ( ConfigMaybe(..) )
 
 deriving via Gist.Showily Player instance Gist Player

@@ -53,13 +53,12 @@ things to recommend and disrecommend them. I'm writing about three of them here.
 
 ## Design goals
 
+* It should pretty-print, with indentation that adjusts to the available width.
+
 * As a user, you should be able to target configurations specifically or
   generally. "All lists" or "all lists of Ints" or "only lists found at this
   specific point in the data structure". "All floating-point numbers" or
   "`Float` but not `Double`".
-
-* It should pretty-print, with indentation that adjusts to the available width
-  and configurable layout options.
 
 * It should be low boilerplate, both as a user and an implementer.
 
@@ -181,7 +180,7 @@ But if that's not usually useful to you, it's fine not to show it by default.
 (At this point, chess pedants may be pointing out that this data type doesn't
 capture everything you need for chess. You can't reliably tell whether
 en passant is currently legal. Maybe there are other problems too. Yes, well
-done chess pedants, you're very clever. Now shut up.)
+done chess pedants, you're very clever, now shut up.)
 
 ## Possible designs
 
@@ -257,7 +256,7 @@ Another problem is, I expect consistency to be hard. Whatever design decisions I
 make, they're not enforced through anything. So someone who disagrees with them,
 or simply isn't paying attention to them, can easily make different ones, and
 then users need to remember things. (E.g. I had `gistList`, `gistTuple2` and
-`gistFloat` both take precedence parameters, but they'll completely ignore them.
+`gistFloat` all take precedence parameters, but they'll completely ignore them.
 So maybe someone in a similar situation decides not to bother with those
 parameters.)
 
@@ -426,8 +425,8 @@ instance Gist a => Gist [a] where
   gistPrec = ...
 ```
 
-This is the foundation of what I formerly called the "simple" approach, which is
-implemented in the module `Gist.Simple`.
+This is the foundation of the approach I've implemented in the module
+`Gist.OneClass`.
 
 There are a few significant complications. One is, this won't handle `String`
 well, because that's just `[Char]`. Other typeclasses (including `Show`) solve
@@ -435,7 +434,7 @@ this by having an extra method for "how to handle lists of this type"; then you
 give that method a default implementation, but override it for `Char`. This
 seems fine as a solution, by which I mean "I hate it but I don't have any better
 ideas". I'm not going to bother showing it here. (Also it's not actually
-implemented for this solution in the code yet.)
+implemented for this approach in the code yet.)
 
 Next: the typechecking here doesn't work very well. If we try
 
@@ -728,7 +727,7 @@ users say "this option only applies at this location", or "at locations matching
 becomes super awkward to handle things like "only show three levels deep
 of this self-referential data type".)
 
-This is currently implemented in the `Gist.Monadic` module. There's also a
+This is currently implemented in the `Gist.TwoClass` module. There's also a
 `Gist.Dynamic` module which has just the config-data-structure part, and is
 actually the implementation I've fleshed out the most. But I currently think
 it's not worth exploring more and not worth discussing in depth by itself.
@@ -1070,7 +1069,8 @@ So some things I'd like to know from readers:
   support for it for a library you maintain or similar?
 * Which version do you think is coolest / are you most likely to use / least
   likely to be annoyed by?
-* Do any of them seem to have major advantages or disadvantages I missed?
+* Do you see ways to improve any of them without significant costs?
+* Do any of them seem to have significant advantages or disadvantages I missed?
 * What would you use them for?
 * Can you think of other approaches to solving this problem that you think you
   might like better than any of these?
@@ -1078,3 +1078,7 @@ So some things I'd like to know from readers:
 I have some opinions on these myself, but I'd prefer to wait and see what others
 say before revealing. I also have another possible approach vaguely in mind; but
 if I waited to explore it before publishing, then this would never get finished.
+
+The canonical public place to leave comments is the reddit thread (link
+incoming). But I've also set up a [google
+form](https://forms.gle/wjW9dxr9r9qXmHLB8) you can fill in if you prefer.

@@ -6,12 +6,12 @@ import           Test.Hspec                     ( describe
 
 import qualified Classless
 import qualified Dynamic
-import qualified Monadic
-import qualified Simple
+import qualified OneClass
+import qualified TwoClass
 
 main :: IO ()
 main = hspec $ do
   describe "Classless" $ Classless.spec
-  describe "Simple" $ Simple.spec
+  describe "OneClass" $ OneClass.spec
   describe "Dynamic" $ Dynamic.spec
-  describe "Monadic" $ Monadic.spec
+  describe "TwoClass" $ TwoClass.spec

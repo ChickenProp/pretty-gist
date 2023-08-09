@@ -54,8 +54,8 @@ library
   exposed-modules:
       Gist.Classless
       Gist.Dynamic
-      Gist.Monadic
-      Gist.Simple
+      Gist.OneClass
+      Gist.TwoClass
   other-modules:
       Paths_pretty_gist
   hs-source-dirs:
@@ -74,12 +74,12 @@ test-suite pretty-gist-test
   other-modules:
       ChessBoard
       ChessBoard.Classless
-      ChessBoard.Simple
-      ChessBoard.Monadic
+      ChessBoard.OneClass
+      ChessBoard.TwoClass
       Classless
       Dynamic
-      Monadic
-      Simple
+      OneClass
+      TwoClass
       Paths_pretty_gist
   hs-source-dirs:
       test

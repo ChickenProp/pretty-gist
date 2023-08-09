@@ -1,4 +1,4 @@
-module Gist.Simple
+module Gist.OneClass
   ( Gist(..)
   , Gister(..)
   , Showily(..)

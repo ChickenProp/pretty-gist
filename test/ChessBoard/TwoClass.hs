@@ -1,8 +1,8 @@
 {-# OPTIONS_GHC -Wno-orphans #-}
 
-module ChessBoard.Monadic
+module ChessBoard.TwoClass
   ( module ChessBoard
-  , module ChessBoard.Monadic
+  , module ChessBoard.TwoClass
   ) where
 
 import           ChessBoard
@@ -11,8 +11,8 @@ import           Data.Monoid                    ( Last(..) )
 import           Data.Proxy                     ( Proxy(..) )
 import           Data.Typeable                  ( Typeable )
 import           GHC.Generics                   ( Generic )
-import qualified Gist.Monadic                  as Gist
-import           Gist.Monadic                   ( Configurable(..)
+import qualified Gist.TwoClass                 as Gist
+import           Gist.TwoClass                  ( Configurable(..)
                                                 , Gist(..)
                                                 , fromLast
                                                 )

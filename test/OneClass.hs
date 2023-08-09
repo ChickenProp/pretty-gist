@@ -1,4 +1,4 @@
-module Simple
+module OneClass
   ( spec
   ) where
 
@@ -23,13 +23,13 @@ import qualified Test.Hspec.Core.Spec          as Hspec.Spec
 import           Test.Hspec.Expectations
 import qualified Test.QuickCheck               as QC
 
-import qualified ChessBoard.Simple             as CB
-import qualified Gist.Simple                   as Gist
-import qualified Gist.Simple                   as Gist.ConfigList
+import qualified ChessBoard.OneClass           as CB
+import qualified Gist.OneClass                 as Gist
+import qualified Gist.OneClass                 as Gist.ConfigList
                                                 ( ConfigList(..) )
-import qualified Gist.Simple                   as Gist.ConfigMaybe
+import qualified Gist.OneClass                 as Gist.ConfigMaybe
                                                 ( ConfigMaybe(..) )
-import           Gist.Simple                    ( Gist(..) )
+import           Gist.OneClass                  ( Gist(..) )
 
 spec :: Hspec.Spec
 spec = do

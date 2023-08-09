@@ -1,6 +1,6 @@
 {-# LANGUAGE UndecidableSuperClasses #-}
 
-module Gist.Monadic where
+module Gist.TwoClass where
 
 import           Control.Applicative            ( (<|>) )
 import           Control.Monad                  ( guard )

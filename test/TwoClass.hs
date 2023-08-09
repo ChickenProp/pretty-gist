@@ -1,4 +1,4 @@
-module Monadic
+module TwoClass
   ( spec
   ) where
 
@@ -21,9 +21,9 @@ import           Test.Hspec.Expectations
 import qualified Test.QuickCheck               as QC
 import           Type.Reflection                ( someTypeRep )
 
-import qualified ChessBoard.Monadic            as CB
-import qualified Gist.Monadic                  as Gist
-import           Gist.Monadic                   ( gist )
+import qualified ChessBoard.TwoClass           as CB
+import qualified Gist.TwoClass                 as Gist
+import           Gist.TwoClass                  ( gist )
 
 spec :: Hspec.Spec
 spec = do
