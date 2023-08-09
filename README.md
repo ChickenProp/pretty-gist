@@ -2,7 +2,8 @@
 about this at Zurihac 2023. If you read this document, I don't think there's
 much point in additionally watching the video.*
 
-This is an exploration of a new-to-me approach to stringification.
+This is an exploration of a new-to-me approach to stringification. Except that
+right now it's three different approaches that broadly share a common goal.
 
 The lowest-friction way to stringify things in Haskell is usually `show`. It
 gives the user close to zero ability to control how the thing is rendered.
@@ -193,8 +194,10 @@ extent.
 Perhaps the very simplest solution is just to write a custom renderer every time
 I need one. I'm not going to do that.
 
-A level up from that is to write renderers for lots of different data types and
-combine them. We can write
+A level up from that, which I've implemented in the module
+[`Gist.Classless`](https://github.com/ChickenProp/pretty-gist/blob/master/src/Gist/Classless.hs),
+is to write renderers for lots of different data types and combine them. We can
+write
 
 ```haskell
 newtype Prec = Prec Int -- precedence level, 0 - 11
@@ -426,7 +429,7 @@ instance Gist a => Gist [a] where
 ```
 
 This is the foundation of the approach I've implemented in the module
-`Gist.OneClass`.
+[`Gist.OneClass`](https://github.com/ChickenProp/pretty-gist/blob/master/src/Gist/OneClass.hs).
 
 There are a few significant complications. One is, this won't handle `String`
 well, because that's just `[Char]`. Other typeclasses (including `Show`) solve
@@ -727,10 +730,12 @@ users say "this option only applies at this location", or "at locations matching
 becomes super awkward to handle things like "only show three levels deep
 of this self-referential data type".)
 
-This is currently implemented in the `Gist.TwoClass` module. There's also a
-`Gist.Dynamic` module which has just the config-data-structure part, and is
-actually the implementation I've fleshed out the most. But I currently think
-it's not worth exploring more and not worth discussing in depth by itself.
+This is currently implemented in the
+[`Gist.TwoClass`](https://github.com/ChickenProp/pretty-gist/blob/master/src/Gist/TwoClass.hs)
+module. There's also a `Gist.Dynamic` module which has just the
+config-data-structure part, and is actually the implementation I've fleshed out
+the most. But I currently think it's not worth exploring more and not worth
+discussing in depth by itself.
 
 Somewhat simplified, here's the main stuff going on with this solution:
 
