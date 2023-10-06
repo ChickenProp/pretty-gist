@@ -52,10 +52,7 @@ common common
 library
   import: common
   exposed-modules:
-      Gist.Classless
-      Gist.Dynamic
-      Gist.OneClass
-      Gist.TwoClass
+      Gist
   other-modules:
       Paths_pretty_gist
   hs-source-dirs:
@@ -73,13 +70,6 @@ test-suite pretty-gist-test
   main-is: Spec.hs
   other-modules:
       ChessBoard
-      ChessBoard.Classless
-      ChessBoard.OneClass
-      ChessBoard.TwoClass
-      Classless
-      Dynamic
-      OneClass
-      TwoClass
       Paths_pretty_gist
   hs-source-dirs:
       test

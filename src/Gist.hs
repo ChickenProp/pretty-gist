@@ -1,4 +1,4 @@
-module Gist.OneClass
+module Gist
   ( Gist(..)
   , Gister(..)
   , Showily(..)
@@ -116,9 +116,7 @@ instance Gist (Maybe a) where
       Nothing -> "_"
       Just x  -> runGisterPrec prec gistElem x
 
-data ConfigPrintf = ConfigPrintf
-  { printfFmt :: Maybe String
-  }
+data ConfigPrintf = ConfigPrintf { printfFmt :: Maybe String }
   deriving stock Generic
 
 newtype Printfily a = Printfily a
@@ -138,10 +136,7 @@ deriving via Printfily Double instance Gist Double
 newtype MyFloat = MyFloat Float
   deriving newtype (Floating, Fractional, Num, Show, Gist)
 
-data ConfigList a = ConfigList
-  { gistElem  :: Gister a
-  , showFirst :: Maybe Int
-  }
+data ConfigList a = ConfigList { gistElem :: Gister a, showFirst :: Maybe Int }
   deriving stock Generic
 
 instance Gist [a] where
@@ -157,9 +152,7 @@ instance Gist [a] where
             (start, _ : _) -> (runGister gistElem <$> start) ++ ["..."]
     in  align $ list elems
 
-data ConfigSet a = ConfigSet
-  { gistElem :: Gister a
-  }
+data ConfigSet a = ConfigSet { gistElem :: Gister a }
   deriving stock Generic
 
 instance Gist (Set a) where
@@ -185,8 +178,8 @@ instance Gist (a, b) where
   defaultConfig = ConfigTuple2 (ConfGister $ defaultConfig @a)
                                (ConfGister $ defaultConfig @b)
 
-  gistPrec _ (ConfigTuple2 {..}) (a, b) =
-    tupled [runGister gistFst a, runGister gistSnd b]
+  gistPrec _ (ConfigTuple2 {..}) (a, b) = tupled
+    [runGister gistFst a, runGister gistSnd b]
 
 parensIf :: Bool -> Doc ann -> Doc ann
 parensIf cond = if cond then parens else id
